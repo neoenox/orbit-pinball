@@ -1,0 +1,268 @@
+import './style.css';
+import { Physics, WIDTH, HEIGHT, STEP, rails, bumpers } from './physics.ts';
+
+document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+  <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><span class="edition">ブラウザで、ひと遊び。 <span class="edition-dot"></span> VOL. 001</span></header>
+  <main class="layout">
+    <section class="intro">
+      <div class="eyebrow"><span></span> THE CLASSIC, RECHARGED</div>
+      <h1>ONE MORE<br><span>ORBIT.</span></h1>
+      <p class="lead">あと1球、が止まらない。</p>
+      <p class="description">狙って、弾いて、もう一度。<br>小さな宇宙で、ハイスコアを目指そう。</p>
+      <div class="scoreboard"><div class="score-label">YOUR SCORE <span id="multiplier">×1</span></div><div id="score" class="score">000000</div><div class="best-row"><span>♔ PERSONAL BEST</span><strong id="best">000000</strong></div></div>
+      <div class="round-row"><div><span class="small-label">BALLS LEFT</span><div id="balls" class="balls" aria-label="残り3球"><i></i><i></i><i></i></div></div><div class="round-status"><span class="small-label">STATUS</span><strong id="status" role="status">READY TO ROLL</strong></div></div>
+      <button id="start" class="primary">ゲームをはじめる <span>↗</span></button>
+      <div class="utility"><button id="pause" disabled aria-label="一時停止">Ⅱ 一時停止</button><button id="sound" aria-pressed="true">♫ サウンド ON</button></div>
+      <p class="local-note">ハイスコアはこのブラウザに保存されます</p>
+    </section>
+    <section class="machine-area" aria-label="ピンボール台">
+      <div class="cabinet"><div class="cabinet-top"><span>ORBIT / 01</span><span class="live-lamp">● FREE PLAY</span></div>
+        <div class="playfield"><canvas id="table" width="460" height="760" aria-label="ピンボール。左右矢印でフリッパー、スペース長押しで発射。"></canvas>
+          <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
+          <div id="toast" class="toast" role="status"></div>
+        </div>
+        <div class="cabinet-bottom"><span>KEEP THE BALL IN ORBIT</span><div class="charge-track"><div id="charge"></div></div><span>✦</span></div>
+      </div>
+      <div class="touch-controls"><button id="left" aria-label="左フリッパー">◀ <span>LEFT</span></button><button id="launch" aria-label="長押しして離すと発射">発射 <span>HOLD</span></button><button id="right" aria-label="右フリッパー"><span>RIGHT</span> ▶</button></div>
+    </section>
+    <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
+      <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
+      <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p></div>
+      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">AIM A LITTLE HIGHER</span><h3>バンパーを狙おう。</h3><p>光るバンパーは100点。<br>10ヒットごとに倍率アップ。<br>最大 ×5 でスコアを伸ばそう。</p></div>
+      <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
+    </aside>
+  </main>
+  <footer><span>NO COINS. JUST GOOD TIMES.</span><span>ひと休みを、ハイスコアに。 <span class="footer-star">✳</span></span></footer>`;
+
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const canvas = $<HTMLCanvasElement>('table');
+const ctx = canvas.getContext('2d')!;
+const physics = new Physics();
+type State = 'ready' | 'playing' | 'paused' | 'over';
+let state: State = 'ready';
+let score = 0, best = 0, balls = 3, hits = 0;
+let left = false, right = false, charging = false, power = 0, sound = true;
+let audio: AudioContext | undefined;
+let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
+let railSoundTime = 0;
+const trail: { x: number; y: number }[] = [];
+const sparks: { x: number; y: number; vx: number; vy: number; life: number; color: string }[] = [];
+const flashes = [0, 0, 0];
+try { best = Math.max(0, Number(localStorage.getItem('orbit-best')) || 0); } catch { /* Storage is optional. */ }
+
+function tone(frequency = 440, duration = 0.12, volume = 0.055) {
+  if (!sound) return;
+  try {
+    audio ??= new AudioContext();
+    void audio.resume().catch(() => {});
+    const oscillator = audio.createOscillator(), gain = audio.createGain();
+    oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, audio.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.5, audio.currentTime + duration);
+    gain.gain.setValueAtTime(volume, audio.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+    oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + duration);
+  } catch { /* Audio availability must never stop a game. */ }
+}
+
+function sync() {
+  $('score').textContent = String(score).padStart(6, '0');
+  $('best').textContent = String(best).padStart(6, '0');
+  $('multiplier').textContent = `×${Math.min(5, 1 + Math.floor(hits / 10))}`;
+  $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
+  $('balls').setAttribute('aria-label', `残り${balls}球`);
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
+  $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
+  $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
+  $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
+}
+function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
+function clearInput() { left = false; right = false; charging = false; power = 0; }
+function start() {
+  state = 'playing'; score = 0; hits = 0; balls = 3; clearInput(); trail.length = 0; sparks.length = 0;
+  flashes.fill(0); physics.resetBall(); $('overlay').classList.add('hidden'); sync();
+  toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
+}
+function pause() {
+  if (state !== 'playing' && state !== 'paused') return;
+  state = state === 'playing' ? 'paused' : 'playing'; clearInput();
+  $('overlay').classList.toggle('hidden', state === 'playing');
+  if (state === 'paused') {
+    $('overlay-kicker').textContent = 'TAKE YOUR TIME'; $('overlay-title').textContent = 'ちょっと、ひと休み。';
+    $('overlay-text').textContent = 'P キー、または下のボタンで再開'; $('overlay-start').textContent = 'ゲームを再開 ↗';
+  }
+  sync();
+}
+function beginCharge() {
+  if (state !== 'playing' || physics.launched || charging) return;
+  charging = true; power = 0; tone(130, 0.08);
+}
+function releaseCharge() {
+  if (!charging) return;
+  charging = false;
+  if (state === 'playing') { physics.launch(power); tone(220 + power * 300, 0.25); toast('KEEP IT IN ORBIT!'); sync(); }
+  power = 0;
+}
+
+physics.onHit = i => {
+  score += 100 * Math.min(5, 1 + Math.floor(hits / 10)); hits++;
+  flashes[i] = 1; shake = 3;
+  const bumper = bumpers[i];
+  for (let j = 0; j < 14; j++) {
+    const angle = Math.random() * Math.PI * 2, speed = 60 + Math.random() * 160;
+    sparks.push({ x: bumper.x, y: bumper.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.6, color: i === 2 ? '#ff795f' : '#6ce8d2' });
+  }
+  if (hits % 10 === 0 && hits <= 40) toast(`倍率 UP! ×${Math.min(5, 1 + hits / 10)}`);
+  saveBest(); sync(); tone(600 + i * 180, 0.16);
+};
+physics.onRail = () => {
+  if (clock - railSoundTime < 0.1) return;
+  railSoundTime = clock; score += 10; saveBest(); sync(); tone(230, 0.06, 0.025);
+};
+function saveBest() {
+  if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
+}
+physics.onDrain = () => {
+  balls--; clearInput(); trail.length = 0; tone(150, 0.4);
+  if (balls === 0) {
+    state = 'over'; $('overlay').classList.remove('hidden');
+    $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
+    $('overlay-title').textContent = score.toLocaleString(); $('overlay-text').textContent = 'もう1回、記録を超えてみよう。';
+    $('overlay-start').textContent = 'もう一度プレイ ↗';
+  } else { physics.resetBall(); toast(`あと${balls}球。SPACE 長押しで発射`); }
+  sync();
+};
+
+$('start').addEventListener('click', start);
+$('overlay-start').addEventListener('click', () => state === 'paused' ? pause() : start());
+$('pause').addEventListener('click', pause);
+$('sound').addEventListener('click', () => { sound = !sound; $('sound').textContent = `♫ サウンド ${sound ? 'ON' : 'OFF'}`; $('sound').setAttribute('aria-pressed', String(sound)); if (sound) tone(); });
+const keys = new Set(['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'KeyP', 'Escape']);
+window.addEventListener('keydown', e => {
+  if (!keys.has(e.code) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === 'Space' && e.target instanceof HTMLElement && e.target.closest('button, a') && state !== 'playing') return;
+  e.preventDefault(); if (e.repeat) return;
+  if (e.code === 'KeyP' || e.code === 'Escape') { pause(); return; }
+  if (e.code === 'Space' && (state === 'ready' || state === 'over')) start();
+  if (state !== 'playing') return;
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') { left = true; tone(95, 0.04, 0.02); }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') { right = true; tone(105, 0.04, 0.02); }
+  if (e.code === 'Space') beginCharge();
+});
+window.addEventListener('keyup', e => {
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') left = false;
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') right = false;
+  if (e.code === 'Space') releaseCharge();
+});
+for (const id of ['left', 'right', 'launch']) {
+  const button = $(id);
+  button.addEventListener('pointerdown', e => {
+    e.preventDefault(); button.setPointerCapture(e.pointerId);
+    if (state !== 'playing') return;
+    if (id === 'left') left = true; else if (id === 'right') right = true; else beginCharge();
+    button.classList.add('pressed');
+  });
+  const release = () => { button.classList.remove('pressed'); if (id === 'left') left = false; else if (id === 'right') right = false; else releaseCharge(); };
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', () => { if (id === 'launch') { charging = false; power = 0; } release(); });
+  button.addEventListener('lostpointercapture', release);
+}
+window.addEventListener('blur', () => { clearInput(); if (state === 'playing') pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'playing') pause(); });
+
+function line(points: number[][], color: string, width = 2, glow = 0) {
+  ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.shadowColor = color; ctx.shadowBlur = glow; ctx.stroke(); ctx.shadowBlur = 0;
+}
+function circle(x: number, y: number, r: number, fill: string, stroke?: string, width = 1) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.stroke(); }
+}
+function label(text: string, x: number, y: number, size: number, color: string, weight = '500') {
+  ctx.fillStyle = color; ctx.font = `${weight} ${size}px "Segoe UI", sans-serif`; ctx.textAlign = 'center'; ctx.fillText(text, x, y);
+}
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function draw() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (canvas.width !== WIDTH * dpr) { canvas.width = WIDTH * dpr; canvas.height = HEIGHT * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#101f2b'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.save();
+  if (!reducedMotion && shake > 0.2) ctx.translate(Math.sin(clock * 95) * shake, Math.cos(clock * 85) * shake);
+  for (let x = 20; x < 460; x += 22) for (let y = 20; y < 760; y += 22) circle(x, y, 0.75, '#26404b');
+  // Orbital engraving: a quiet part of the table, below the physical components.
+  ctx.save(); ctx.translate(228, 289); ctx.rotate(-0.5);
+  ctx.strokeStyle = '#294653'; ctx.lineWidth = 1;
+  for (const r of [129, 156, 179]) { ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.72, 0, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.restore();
+  line([[17, 600], [17, 148], [42, 75], [107, 27], [353, 27], [418, 66], [453, 138], [453, 739]], '#3a5963', 2);
+  line([[39, 463], [39, 155], [61, 99], [116, 58], [349, 58], [393, 88]], '#6ce8d2', 2, 8);
+  line([[40, 485], [40, 586], [109, 670], [143, 684]], '#ff795f', 2, 7);
+  line([[390, 467], [390, 585], [342, 660], [316, 677]], '#ff795f', 2, 7);
+  label('O  R  B  I  T', 221, 196, 15, '#8ba4aa', '600');
+  for (let i = 0; i < 3; i++) {
+    circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 7, '#263f49', '#6ce8d2', 1.4);
+    circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 2.5, '#6ce8d2');
+  }
+  for (const wall of rails) {
+    line([[wall.a.x, wall.a.y + 3], [wall.b.x, wall.b.y + 3]], '#080f17', 11);
+    line([[wall.a.x, wall.a.y], [wall.b.x, wall.b.y]], wall.color ?? '#4c6772', wall.color ? 5 : 6, wall.color ? 6 : 0);
+    line([[wall.a.x, wall.a.y - 1], [wall.b.x, wall.b.y - 1]], wall.color ? '#e0eee1' : '#8ca1a4', 1);
+  }
+  bumpers.forEach((b, i) => {
+    const color = i === 2 ? '#ff795f' : '#6ce8d2';
+    circle(b.x, b.y + 7, b.radius + 7, '#08121b');
+    ctx.shadowBlur = 15 + flashes[i] * 30; ctx.shadowColor = color;
+    circle(b.x, b.y, b.radius + 4, '#162e38', color, 2); ctx.shadowBlur = 0;
+    circle(b.x, b.y, b.radius - 3, flashes[i] > 0.5 ? '#e4fff5' : '#203e47', color, 3);
+    circle(b.x, b.y, b.radius - 10, i === 2 ? '#a45449' : '#3e8b82');
+    label('✦', b.x, b.y + 9, 27, i === 2 ? '#ffb79c' : '#a6ffe8');
+    if (flashes[i] > 0) { ctx.globalAlpha = flashes[i]; circle(b.x, b.y, b.radius + (1 - flashes[i]) * 30, 'transparent', color, 2); ctx.globalAlpha = 1; }
+  });
+  label('✦', 228, 423, 27, '#e8b571');
+  label('STAY IN', 228, 463, 13, '#789ba4', '600');
+  label('ORBIT', 228, 498, 34, '#d9e4d9', '800');
+  line([[183, 511], [271, 511]], '#6ce8d2', 1);
+  label('100 PTS / BUMPER', 228, 534, 9, '#718f9a');
+  for (const side of [true, false]) {
+    const f = physics.flipper(side);
+    line([[f.a.x, f.a.y + 5], [f.b.x, f.b.y + 5]], '#080f17', 22);
+    line([[f.a.x, f.a.y], [f.b.x, f.b.y]], '#ff795f', 19, 9);
+    line([[f.a.x, f.a.y - 3], [f.b.x, f.b.y - 3]], '#ffc0a3', 5);
+    circle(f.a.x, f.a.y, 5, '#773b36', '#ffb59b');
+  }
+  label('D R A I N', 228, 740, 10, '#526d77');
+  ctx.save(); ctx.translate(423, 422); ctx.rotate(-Math.PI / 2); label('L A U N C H   ↑', 0, 0, 10, '#8aa4a8'); ctx.restore();
+  const pull = power * 25;
+  for (let i = 0; i < 7; i++) line([[414, 706 + i * 4 + pull * 0.15], [432, 708 + i * 4 + pull * 0.15]], '#799090', 1.5);
+  line([[411, 699 + pull], [435, 699 + pull]], '#e8b571', 5);
+  if (!reducedMotion) trail.forEach((p, i) => { ctx.globalAlpha = i / trail.length * 0.22; circle(p.x, p.y, physics.ball.radius * i / trail.length, '#b7f8ef'); });
+  ctx.globalAlpha = 1;
+  if (state !== 'over') {
+    const { x, y, radius } = physics.ball;
+    const by = !physics.launched ? y + pull : y;
+    circle(x + 3, by + 5, radius + 1, '#07121c');
+    const gradient = ctx.createRadialGradient(x - 3, by - 4, 0, x, by, radius);
+    gradient.addColorStop(0, '#ffffff'); gradient.addColorStop(0.35, '#e3f6f5'); gradient.addColorStop(0.7, '#92acb7'); gradient.addColorStop(1, '#3c6477');
+    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(x, by, radius, 0, Math.PI * 2); ctx.fill();
+  }
+  sparks.forEach(p => { ctx.globalAlpha = Math.max(0, p.life / 0.6); circle(p.x, p.y, 2, p.color); }); ctx.globalAlpha = 1;
+  ctx.restore();
+}
+function frame(time: number) {
+  const dt = Math.min((time - (previous || time)) / 1000, 0.04); previous = time; clock += dt;
+  if (state === 'playing') {
+    if (charging) power = Math.min(1, power + dt * 0.85);
+    accumulator += dt;
+    while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
+    if (physics.launched) { trail.push({ x: physics.ball.x, y: physics.ball.y }); if (trail.length > 12) trail.shift(); }
+    for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) sparks.splice(i, 1);
+    for (let i = 0; i < 3; i++) flashes[i] = Math.max(0, flashes[i] - dt * 3);
+    shake *= Math.exp(-dt * 12);
+    toastTime -= dt; if (toastTime <= 0) $('toast').classList.remove('visible');
+  } else accumulator = 0;
+  $('charge').style.width = `${power * 100}%`;
+  $('left').classList.toggle('pressed', left); $('right').classList.toggle('pressed', right);
+  draw(); requestAnimationFrame(frame);
+}
+sync(); requestAnimationFrame(frame);
