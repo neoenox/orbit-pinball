@@ -1,0 +1,163 @@
+:root {
+  color-scheme: dark;
+  color: #e6e8ff;
+  background: #070817;
+  --ink: #e6e8ff;
+  --muted: #a4a7c7;
+  --coral: #ff50a0;
+  --line: #59589150;
+}
+body {
+  min-height: 100svh;
+  background: radial-gradient(ellipse at 68% 36%, #50288630, transparent 49%),
+    radial-gradient(ellipse at 22% 69%, #093c6235, transparent 45%), #070817;
+  isolation: isolate;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(circle, #acafff80 1px, transparent 1.6px),
+    radial-gradient(circle, #60edff60 1px, transparent 1.5px);
+  background-size: 137px 119px, 83px 173px;
+  background-position: 35px 13px, 60px 90px;
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 60% 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(#a575ff16 1px, transparent 1px), linear-gradient(90deg, #a575ff16 1px, transparent 1px);
+  background-size: 60px 38px;
+  mask-image: linear-gradient(transparent, #000);
+  transform: perspective(300px) rotateX(28deg);
+  transform-origin: bottom;
+}
+.topbar { border-color: #797ac22e; }
+.brand { color: #f1f0ff; }
+.brand-mark { color: #ff60bd; text-shadow: 0 0 16px #f85bbe90; }
+.brand-sub, .edition { color: #adacd0; }
+.edition-dot, .eyebrow>span { background: #56f7e4; box-shadow: 0 0 12px #56f7e4; }
+.header-actions { display: flex; align-items: center; gap: 24px; }
+#effects {
+  padding: 8px 12px;
+  border: 1px solid #986ad180;
+  border-radius: 20px;
+  background: #31204780;
+  color: #e6bcff;
+  font-size: 10px;
+  letter-spacing: .7px;
+}
+#effects:hover { background: #593774; }
+.eyebrow { color: #74fbe8; letter-spacing: 2px; }
+h1 { color: #f5f3ff; text-shadow: 0 0 35px #9783fc28; }
+h1>span {
+  color: #fd73c4;
+  background: linear-gradient(100deg, #ff5cad 2%, #c286ff 55%, #56e6ff);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 18px #ff4ca030);
+}
+.lead { color: #eeefff; }
+.description { color: #a4a7c7; }
+.scoreboard { border-color: #817cc159; position: relative; }
+.scoreboard::before {
+  content: '';
+  position: absolute;
+  width: 65px;
+  height: 2px;
+  top: -1px;
+  background: #58f6e7;
+  box-shadow: 0 0 14px #58f6e7;
+}
+.score { color: #8efcea; text-shadow: 0 0 25px #35ecbe35; }
+.score-label { color: #bcbedd; }
+.score-label>span { color: #fee0a3; background: #463445; border: 1px solid #f6be7255; }
+.best-row { color: #a8a8ca; }
+.best-row strong { color: #f7c781; }
+.small-label { color: #a1a3c4; }
+.balls i { background: #7af9d3; box-shadow: 0 0 10px #4ff4b650, inset -2px -2px 0 #0002; }
+.balls i.spent { background: #343750; }
+.round-status strong { color: #90ecd7; }
+.primary {
+  color: #180d29;
+  border: 1px solid #ffb3e688;
+  background: linear-gradient(110deg, #ff7fba, #c291ff);
+  box-shadow: 0 4px 22px #fa57b22e;
+  font-weight: 700;
+}
+.primary:hover { background: linear-gradient(110deg, #ffa4d0, #bdb1ff); box-shadow: 0 5px 30px #fa57b24a; }
+.utility button { color: #aaaed0; }
+.local-note { color: #8b8daf; }
+.machine-area { position: relative; }
+.machine-area::before {
+  content: '';
+  position: absolute;
+  inset: 5% -13% 12%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 25% 30%, #0be4fd1a, transparent 60%), radial-gradient(ellipse at 85% 70%, #ed22b929, transparent 60%);
+  filter: blur(22px);
+  pointer-events: none;
+  z-index: -1;
+}
+.cabinet {
+  --impact: 0;
+  border: 1px solid #b995fc;
+  background: linear-gradient(135deg, #292044, #131a34 48%, #321733);
+  box-shadow: -4px 0 0 #57f5ed45, 4px 0 0 #ff5fa84a, 0 8px 0 #141327,
+    -10px 0 35px #3ee6f724, 12px 8px 40px #ff46b52a,
+    0 0 calc(12px + var(--impact)*35px) rgb(192 114 255 / calc(.13 + var(--impact)*.23));
+}
+.cabinet-top { color: #c6b9ee; }
+.live-lamp { color: #6dfdd4; text-shadow: 0 0 8px #6dfdd480; }
+.playfield { border-color: #b190ef6b; }
+.cabinet-bottom { color: #b0a7d7; }
+.charge-track { background: #373152; height: 4px; }
+#charge { background: linear-gradient(90deg, #3afad2, #d69aff, #ff64a9); box-shadow: 0 0 12px #fd72bd; }
+.cabinet-bottom>span:last-child { color: #fda8d7; }
+.overlay { background: linear-gradient(transparent 9%, #100b29d9 35%, #170d33e8 65%, transparent 95%); color: #fff0fd; }
+.overlay>span { color: #91f5e9; }
+.overlay h2 { text-shadow: 0 0 25px #d999ff55; }
+.overlay p { color: #c1b9df; }
+.overlay button { color: #1e1433; border-color: #ffd1ed; background: linear-gradient(105deg, #ff8acb, #b69cff); box-shadow: 0 0 35px #ff5cb844; }
+.overlay button:hover { background: #ffa6db; }
+.toast { top: 74%; background: #191332e8; border-color: #ad7fed88; color: #ece1ff; box-shadow: 0 0 20px #bb6cf51a; }
+.ball-save { color: #94ffe7; background: #0b2927ed; border-color: #64fed599; box-shadow: 0 0 12px #4affe522; }
+.touch-controls button { color: #b8c4ec; background: #14172e; border-color: #757aa362; }
+.touch-controls button.pressed { background: #722e79; color: #ffe4ff; border-color: #ff8cde; box-shadow: 0 0 18px #fa4fe83b; }
+#launch { border-color: #b17cb799; color: #f3b6e0; }
+.guide-heading { color: #afbcf5; }
+.guide-heading>span:last-child, .mission-orbit, .footer-star { color: #fc88ca; }
+kbd { background: #171a31; border-color: #73769b65; color: #bbd3ee; }
+.instruction h3, .mission h3 { color: #e4e7fc; }
+.instruction p, .mission p { color: #a4a7c7; }
+.instruction .save-tip { color: #8bd6c3; }
+.mission-orbit { text-shadow: 0 0 18px #fa5da760; }
+.pause-hint, footer { color: #9196bb; }
+.scoreboard.hit .score { color: #fffac7; text-shadow: 0 0 30px #f8c46770; }
+.chain-display {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  color: #ffcd81;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 15px #fb847965;
+}
+.light-effects .cabinet { box-shadow: 0 5px 0 #111126, 0 0 0 3px #655681; }
+.light-effects .machine-area::before { display: none; }
+.light-effects .score, .light-effects h1 { text-shadow: none; }
+@media(max-width:650px) {
+  .header-actions { gap: 0; }
+  .header-actions .edition { display: none; }
+  #effects { font-size: 8px; padding: 6px 9px; }
+  .chain-display { bottom: -14px; font-size: 8px; letter-spacing: .6px; }
+  .machine-area::before { inset-inline: -4%; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .machine-area::before { display: none; }
+}

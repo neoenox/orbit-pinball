@@ -123,3 +123,57 @@ test('ball save preserves lives and score, pauses its timers and relaunches only
   await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
   expect(errors).toEqual([]);
 });
+
+test('neon hit effects, chain feedback and light mode stay responsive', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/'); await page.clock.install();
+  await expect(page.locator('#effects')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#overlay-start').click();
+  await page.keyboard.down('Space'); await page.clock.runFor(800); await page.keyboard.up('Space');
+  for (const index of [0, 1, 2]) {
+    await page.evaluate(async (index) => {
+      const { Physics, bumpers } = await import('/src/physics.ts');
+      const original = Physics.prototype.step;
+      Physics.prototype.step = function (...args: [number, boolean, boolean]) {
+        Physics.prototype.step = original;
+        const bumper = bumpers[index];
+        this.inLane = false;
+        this.ball.x = bumper.x; this.ball.y = bumper.y - bumper.radius - 5;
+        this.ball.vx = 0; this.ball.vy = 100;
+        return original.apply(this, args);
+      };
+    }, index);
+    await page.clock.runFor(100);
+  }
+  await expect(page.locator('#chain')).toHaveText('✦ 3 HIT CHAIN');
+  await expect(page.locator('#score')).toHaveText('000300');
+  await page.screenshot({ path: 'test-results/neon-hit.png', fullPage: true });
+  await page.keyboard.press('p');
+  const frozen = await page.locator('canvas').evaluate(e => (e as HTMLCanvasElement).toDataURL());
+  await page.clock.runFor(900);
+  expect(await page.locator('canvas').evaluate(e => (e as HTMLCanvasElement).toDataURL())).toBe(frozen);
+  await page.locator('#effects').click();
+  await expect(page.locator('body')).toHaveClass('light-effects');
+  await expect(page.locator('#effects')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#score')).toHaveText('000300');
+  await page.keyboard.press('p'); await page.clock.runFor(2500);
+  await expect(page.locator('#chain')).toBeHidden();
+  await page.locator('#effects').click();
+  await expect(page.locator('#effects')).toHaveAttribute('aria-pressed', 'true');
+  expect(errors).toEqual([]);
+});
+
+test('reduced motion starts in light mode with working launch controls', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/'); await page.clock.install();
+  await expect(page.locator('#effects')).toHaveText('✦ 演出 LIGHT');
+  await expect(page.locator('#effects')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('#overlay-start').click();
+  await page.keyboard.down('Space'); await page.clock.runFor(800); await page.keyboard.up('Space');
+  await expect(page.locator('#status')).toHaveText('IN ORBIT');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await page.screenshot({ path: 'test-results/neon-light.png', fullPage: true });
+});
