@@ -13,6 +13,37 @@ test('a launch at either power enters the table and remains finite', () => {
   }
 });
 
+test('launch travels continuously around the shooter bend at every power', () => {
+  const exitSpeeds: number[] = [];
+  for (const power of [0, 0.5, 1]) {
+    const p = new Physics(); p.launch(power);
+    let exited = false;
+    for (let i = 0; i < 480 && !exited; i++) {
+      const before = { x: p.ball.x, y: p.ball.y };
+      p.step(STEP, false, false);
+      const distance = Math.hypot(p.ball.x - before.x, p.ball.y - before.y);
+      assert.ok(distance < 9, `power ${power}: ball jumped ${distance.toFixed(2)}px`);
+      if (!p.inLane) { exited = true; exitSpeeds.push(Math.hypot(p.ball.vx, p.ball.vy)); }
+    }
+    assert.ok(exited, `power ${power} failed to exit the shooter lane`);
+  }
+  assert.ok(exitSpeeds[2] > exitSpeeds[0] + 150, 'charge strength must survive the shooter bend');
+});
+
+test('flippers accelerate into a stroke and return more gently', () => {
+  const p = new Physics();
+  const start = p.leftAngle;
+  p.step(STEP, true, true);
+  const first = start - p.leftAngle;
+  p.step(STEP, true, true);
+  const second = start - p.leftAngle - first;
+  assert.ok(second > first * 1.3, 'a stroke should accelerate instead of jumping to full speed');
+  for (let i = 0; i < 80; i++) p.step(STEP, true, true);
+  const raised = p.leftAngle;
+  for (let i = 0; i < 12; i++) p.step(STEP, false, false);
+  assert.ok(p.leftAngle - raised < 0.45, 'return should not hit as hard as a powered stroke');
+});
+
 test('wall collision separates the ball and reflects its incoming velocity', () => {
   const ball = { x: 8, y: 60, vx: -100, vy: 20, radius: 8 };
   assert.equal(collideRail(ball, { a: { x: 0, y: 0 }, b: { x: 0, y: 100 }, bounce: 0.8 }), true);
@@ -42,6 +73,24 @@ test('both moving flippers propel a contacting ball upward', () => {
   }
 });
 
+test('flipper contact position changes shot power and stroke timing changes direction', () => {
+  const shot = (left: boolean, position: number, delay: number) => {
+    const p = new Physics();
+    for (let i = 0; i < delay; i++) p.step(STEP, left, !left);
+    const f = p.flipper(left);
+    p.launched = true; p.inLane = false;
+    p.ball = { x: f.a.x + (f.b.x - f.a.x) * position, y: f.a.y + (f.b.y - f.a.y) * position - 15, vx: 0, vy: 50, radius: 8 };
+    for (let i = 0; i < 12; i++) p.step(STEP, left, !left);
+    return p.ball;
+  };
+  for (const left of [true, false]) {
+    const base = shot(left, 0.3, 0), tip = shot(left, 0.9, 0), later = shot(left, 0.9, 10);
+    assert.ok(tip.vy < base.vy - 250, 'the faster tip should produce a stronger shot');
+    const difference = Math.abs(Math.atan2(tip.vy, tip.vx) - Math.atan2(later.vy, later.vx));
+    assert.ok(difference > 0.15, 'different contact timing must produce a different aim');
+  }
+});
+
 test('drain fires once and reset prepares a fresh ball', () => {
   const p = new Physics(); let drains = 0;
   p.onDrain = () => drains++;
@@ -62,4 +111,47 @@ test('extended play stays finite and inside side boundaries', () => {
     assert.ok(p.ball.x > 0 && p.ball.x < 460);
   }
   assert.ok(hits > 0); assert.ok(drains > 0);
+});
+
+test('an early drain saves the ball once and automatically relaunches at the same power', () => {
+  const p = new Physics(); let saves = 0, drains = 0;
+  p.onSave = () => saves++; p.onDrain = () => drains++;
+  p.launch(0.65); const launchSpeed = p.ball.vy;
+  p.inLane = false; p.ball.y = 790;
+  p.step(STEP, false, false);
+  assert.equal(saves, 1); assert.equal(drains, 0);
+  assert.equal(p.launched, false); assert.ok(p.relaunchIn > 0);
+  assert.equal(p.launch(1), false, 'manual launch must not skip the rescue countdown');
+  for (let i = 0; i < 240 && !p.launched; i++) p.step(STEP, false, false);
+  assert.equal(p.launched, true); assert.equal(p.ball.vy, launchSpeed);
+  assert.equal(p.saveRemaining, 0, 'the rescue must not grant another save');
+  p.inLane = false; p.ball.y = 790;
+  p.step(STEP, false, false);
+  assert.equal(saves, 1); assert.equal(drains, 1);
+});
+
+test('the five-second save expires on simulation time, not wall clock', () => {
+  const p = new Physics(); let saves = 0, drains = 0;
+  p.onSave = () => saves++; p.onDrain = () => drains++;
+  p.launch(0.5); p.inLane = false;
+  assert.equal(p.saveRemaining, 5);
+  for (let i = 0; i < 240 * 5; i++) {
+    p.ball = { x: 228, y: 450, vx: 0, vy: 0, radius: 8 };
+    p.step(STEP, false, false);
+  }
+  assert.equal(p.saveRemaining, 0);
+  p.ball.y = 790; p.step(STEP, false, false);
+  assert.equal(saves, 0); assert.equal(drains, 1);
+});
+
+test('a new ball clears a pending rescue and earns its own save on launch', () => {
+  const p = new Physics();
+  p.launch(0.5); p.inLane = false; p.ball.y = 790;
+  p.step(STEP, false, false);
+  assert.ok(p.relaunchIn > 0);
+  p.resetBall();
+  assert.equal(p.relaunchIn, 0); assert.equal(p.saveRemaining, 0);
+  for (let i = 0; i < 240; i++) p.step(STEP, false, false);
+  assert.equal(p.launched, false);
+  p.launch(0.2); assert.equal(p.saveRemaining, 5);
 });

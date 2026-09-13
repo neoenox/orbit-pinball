@@ -70,3 +70,56 @@ test('mobile layout and pointer controls', async ({ page }) => {
   await expect(page.locator('#sound')).toHaveAttribute('aria-pressed', 'false');
   await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });
 });
+
+test('ball save preserves lives and score, pauses its timers and relaunches only once', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/'); await page.clock.install();
+  await page.locator('#overlay-start').click();
+  await page.keyboard.down('Space'); await page.clock.runFor(700); await page.keyboard.up('Space');
+  await page.clock.runFor(400);
+  await expect(page.locator('#ball-save')).toBeVisible();
+  const countdown = await page.locator('#ball-save').textContent();
+  await page.keyboard.press('p'); await page.clock.runFor(6000);
+  await expect(page.locator('#ball-save')).toHaveText(countdown!);
+  await page.keyboard.press('p');
+
+  const drainOnNextStep = async () => {
+    // Fixture only: put the live ball at the drain. All timing, callbacks, UI and relaunch logic are real.
+    await page.evaluate(async () => {
+      const { Physics } = await import('/src/physics.ts');
+      const original = Physics.prototype.step;
+      Physics.prototype.step = function (...args: [number, boolean, boolean]) {
+        Physics.prototype.step = original;
+        this.inLane = false;
+        this.ball.x = 228; this.ball.y = 790; this.ball.vx = 0; this.ball.vy = 100;
+        return original.apply(this, args);
+      };
+    });
+    await page.clock.runFor(30);
+  };
+  const score = await page.locator('#score').textContent();
+  await drainOnNextStep();
+  await expect(page.locator('#status')).toHaveText('BALL SAVED');
+  await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
+  await expect(page.locator('#score')).toHaveText(score!);
+  await expect(page.locator('#toast')).toContainText('自動で再発射');
+  await page.screenshot({ path: 'test-results/ball-save.png', fullPage: true });
+  await page.keyboard.press('p'); await page.clock.runFor(3000);
+  await expect(page.locator('#ball-save')).toContainText('BALL SAVED');
+  await page.keyboard.press('p'); await page.clock.runFor(800);
+  await expect(page.locator('#status')).toHaveText('IN ORBIT');
+  await expect(page.locator('#ball-save')).toBeHidden();
+  await drainOnNextStep();
+  await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り2球');
+  await expect(page.locator('#status')).toHaveText('HOLD SPACE');
+
+  await page.keyboard.down('Space'); await page.clock.runFor(700); await page.keyboard.up('Space');
+  await page.clock.runFor(100); await expect(page.locator('#ball-save')).toBeVisible();
+  await drainOnNextStep(); await expect(page.locator('#status')).toHaveText('BALL SAVED');
+  await page.locator('#start').click(); await page.clock.runFor(1000);
+  await expect(page.locator('#status')).toHaveText('HOLD SPACE');
+  await expect(page.locator('#ball-save')).toBeHidden();
+  await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
+  expect(errors).toEqual([]);
+});

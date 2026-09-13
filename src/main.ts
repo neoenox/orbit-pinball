@@ -1,5 +1,5 @@
 import './style.css';
-import { Physics, WIDTH, HEIGHT, STEP, rails, bumpers } from './physics.ts';
+import { Physics, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><span class="edition">ブラウザで、ひと遊び。 <span class="edition-dot"></span> VOL. 001</span></header>
@@ -18,6 +18,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <section class="machine-area" aria-label="ピンボール台">
       <div class="cabinet"><div class="cabinet-top"><span>ORBIT / 01</span><span class="live-lamp">● FREE PLAY</span></div>
         <div class="playfield"><canvas id="table" width="460" height="760" aria-label="ピンボール。左右矢印でフリッパー、スペース長押しで発射。"></canvas>
+          <div id="ball-save" class="ball-save" hidden></div>
           <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
           <div id="toast" class="toast" role="status"></div>
         </div>
@@ -27,7 +28,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </section>
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
-      <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p></div>
+      <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
       <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">AIM A LITTLE HIGHER</span><h3>バンパーを狙おう。</h3><p>光るバンパーは100点。<br>10ヒットごとに倍率アップ。<br>最大 ×5 でスコアを伸ばそう。</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
@@ -45,9 +46,12 @@ let left = false, right = false, charging = false, power = 0, sound = true;
 let audio: AudioContext | undefined;
 let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
 let railSoundTime = 0;
+let hitStreak = 0, lastHitTime = -Infinity;
 const trail: { x: number; y: number }[] = [];
 const sparks: { x: number; y: number; vx: number; vy: number; life: number; color: string }[] = [];
 const flashes = [0, 0, 0];
+const flipperFlashes = [0, 0];
+const popups: { x: number; y: number; text: string; life: number }[] = [];
 try { best = Math.max(0, Number(localStorage.getItem('orbit-best')) || 0); } catch { /* Storage is optional. */ }
 
 function tone(frequency = 440, duration = 0.12, volume = 0.055) {
@@ -69,7 +73,7 @@ function sync() {
   $('multiplier').textContent = `×${Math.min(5, 1 + Math.floor(hits / 10))}`;
   $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
   $('balls').setAttribute('aria-label', `残り${balls}球`);
-  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
   $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
   $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
   $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
@@ -78,6 +82,7 @@ function toast(message: string) { $('toast').textContent = message; $('toast').c
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
   state = 'playing'; score = 0; hits = 0; balls = 3; clearInput(); trail.length = 0; sparks.length = 0;
+  hitStreak = 0; lastHitTime = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
   flashes.fill(0); physics.resetBall(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
@@ -92,26 +97,42 @@ function pause() {
   sync();
 }
 function beginCharge() {
-  if (state !== 'playing' || physics.launched || charging) return;
+  if (state !== 'playing' || physics.launched || physics.relaunchIn > 0 || charging) return;
   charging = true; power = 0; tone(130, 0.08);
 }
 function releaseCharge() {
   if (!charging) return;
   charging = false;
-  if (state === 'playing') { physics.launch(power); tone(220 + power * 300, 0.25); toast('KEEP IT IN ORBIT!'); sync(); }
+  if (state === 'playing') physics.launch(power);
   power = 0;
 }
 
 physics.onHit = i => {
-  score += 100 * Math.min(5, 1 + Math.floor(hits / 10)); hits++;
+  const points = 100 * Math.min(5, 1 + Math.floor(hits / 10));
+  score += points; hits++;
+  hitStreak = clock - lastHitTime <= 2.2 ? hitStreak + 1 : 1; lastHitTime = clock;
   flashes[i] = 1; shake = 3;
   const bumper = bumpers[i];
+  popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${hitStreak > 1 ? `${hitStreak} HITS · ` : ''}+${points}`, life: 0.85 });
   for (let j = 0; j < 14; j++) {
     const angle = Math.random() * Math.PI * 2, speed = 60 + Math.random() * 160;
     sparks.push({ x: bumper.x, y: bumper.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.6, color: i === 2 ? '#ff795f' : '#6ce8d2' });
   }
   if (hits % 10 === 0 && hits <= 40) toast(`倍率 UP! ×${Math.min(5, 1 + hits / 10)}`);
-  saveBest(); sync(); tone(600 + i * 180, 0.16);
+  saveBest(); sync(); tone(600 + i * 180 + Math.min(hitStreak - 1, 6) * 55, 0.16);
+};
+physics.onFlipper = (isLeft, speed) => {
+  flipperFlashes[isLeft ? 0 : 1] = Math.min(1, speed / 650);
+  tone(180 + Math.min(500, speed * 0.35), 0.08, 0.025);
+};
+physics.onLaunch = () => {
+  tone(220 + Math.max(0, -physics.ball.vy - 980) / 340 * 300, 0.25);
+  if (physics.saveRemaining > 0) toast('5秒間の BALL SAVE · 各球1回');
+  sync();
+};
+physics.onSave = () => {
+  clearInput(); trail.length = 0; popups.length = 0; hitStreak = 0; lastHitTime = -Infinity;
+  toast('BALL SAVED! 球数そのまま、自動で再発射'); tone(880, 0.3); sync();
 };
 physics.onRail = () => {
   if (clock - railSoundTime < 0.1) return;
@@ -121,7 +142,7 @@ function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
 }
 physics.onDrain = () => {
-  balls--; clearInput(); trail.length = 0; tone(150, 0.4);
+  balls--; clearInput(); trail.length = 0; hitStreak = 0; lastHitTime = -Infinity; tone(150, 0.4);
   if (balls === 0) {
     state = 'over'; $('overlay').classList.remove('hidden');
     $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
@@ -205,9 +226,14 @@ function draw() {
   }
   for (const wall of rails) {
     line([[wall.a.x, wall.a.y + 3], [wall.b.x, wall.b.y + 3]], '#080f17', 11);
+  }
+  for (const wall of rails) {
     line([[wall.a.x, wall.a.y], [wall.b.x, wall.b.y]], wall.color ?? '#4c6772', wall.color ? 5 : 6, wall.color ? 6 : 0);
+  }
+  for (const wall of rails) {
     line([[wall.a.x, wall.a.y - 1], [wall.b.x, wall.b.y - 1]], wall.color ? '#e0eee1' : '#8ca1a4', 1);
   }
+  if (!physics.inLane) line([[shooterGate.a.x, shooterGate.a.y], [shooterGate.b.x, shooterGate.b.y]], '#e8b571', 3, 4);
   bumpers.forEach((b, i) => {
     const color = i === 2 ? '#ff795f' : '#6ce8d2';
     circle(b.x, b.y + 7, b.radius + 7, '#08121b');
@@ -225,12 +251,13 @@ function draw() {
   label('100 PTS / BUMPER', 228, 534, 9, '#718f9a');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
+    const flash = flipperFlashes[side ? 0 : 1];
     line([[f.a.x, f.a.y + 5], [f.b.x, f.b.y + 5]], '#080f17', 22);
     line([[f.a.x, f.a.y], [f.b.x, f.b.y]], '#ff795f', 19, 9);
-    line([[f.a.x, f.a.y - 3], [f.b.x, f.b.y - 3]], '#ffc0a3', 5);
+    line([[f.a.x, f.a.y - 3], [f.b.x, f.b.y - 3]], flash > 0.25 ? '#fff7db' : '#ffc0a3', 5, flash * 18);
     circle(f.a.x, f.a.y, 5, '#773b36', '#ffb59b');
   }
-  label('D R A I N', 228, 740, 10, '#526d77');
+  label(physics.saveRemaining > 0 ? '✦ BALL SAVE ✦' : 'D R A I N', 228, 740, 10, physics.saveRemaining > 0 ? '#6ce8d2' : '#526d77');
   ctx.save(); ctx.translate(423, 422); ctx.rotate(-Math.PI / 2); label('L A U N C H   ↑', 0, 0, 10, '#8aa4a8'); ctx.restore();
   const pull = power * 25;
   for (let i = 0; i < 7; i++) line([[414, 706 + i * 4 + pull * 0.15], [432, 708 + i * 4 + pull * 0.15]], '#799090', 1.5);
@@ -246,11 +273,17 @@ function draw() {
     ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(x, by, radius, 0, Math.PI * 2); ctx.fill();
   }
   sparks.forEach(p => { ctx.globalAlpha = Math.max(0, p.life / 0.6); circle(p.x, p.y, 2, p.color); }); ctx.globalAlpha = 1;
+  for (const popup of popups) {
+    ctx.globalAlpha = Math.min(1, popup.life * 3);
+    label(popup.text, popup.x, popup.y - (reducedMotion ? 0 : (0.85 - popup.life) * 30), 13, '#fff6d9', '700');
+  }
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 function frame(time: number) {
-  const dt = Math.min((time - (previous || time)) / 1000, 0.04); previous = time; clock += dt;
+  const dt = Math.min((time - (previous || time)) / 1000, 0.04); previous = time;
   if (state === 'playing') {
+    clock += dt;
     if (charging) power = Math.min(1, power + dt * 0.85);
     accumulator += dt;
     while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
@@ -258,9 +291,14 @@ function frame(time: number) {
     for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     for (let i = sparks.length - 1; i >= 0; i--) if (sparks[i].life <= 0) sparks.splice(i, 1);
     for (let i = 0; i < 3; i++) flashes[i] = Math.max(0, flashes[i] - dt * 3);
+    for (let i = 0; i < 2; i++) flipperFlashes[i] = Math.max(0, flipperFlashes[i] - dt * 7);
+    for (let i = popups.length - 1; i >= 0; i--) { popups[i].life -= dt; if (popups[i].life <= 0) popups.splice(i, 1); }
     shake *= Math.exp(-dt * 12);
     toastTime -= dt; if (toastTime <= 0) $('toast').classList.remove('visible');
   } else accumulator = 0;
+  const saveDisplay = $('ball-save');
+  saveDisplay.hidden = state === 'ready' || state === 'over' || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
+  saveDisplay.textContent = physics.relaunchIn > 0 ? '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
   $('charge').style.width = `${power * 100}%`;
   $('left').classList.toggle('pressed', left); $('right').classList.toggle('pressed', right);
   draw(); requestAnimationFrame(frame);
