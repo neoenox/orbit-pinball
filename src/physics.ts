@@ -1,3 +1,5 @@
+import { OrbitCourse, targets, entrances } from './orbit.ts';
+
 export type Vec = { x: number; y: number };
 export type Ball = Vec & { vx: number; vy: number; radius: number };
 export type Rail = { a: Vec; b: Vec; bounce?: number; color?: string };
@@ -49,6 +51,7 @@ export function collideRail(ball: Ball, wall: Rail, surface: Vec = { x: 0, y: 0 
 }
 
 export class Physics {
+  readonly orbit = new OrbitCourse();
   ball: Ball = { x: 423, y: 683, vx: 0, vy: 0, radius: 8 };
   launched = false;
   inLane = true;
@@ -76,6 +79,7 @@ export class Physics {
 
   resetBall() {
     this.placeBall();
+    this.orbit.reset();
     this.saveRemaining = 0; this.relaunchIn = 0; this.saveAvailable = true;
   }
 
@@ -108,6 +112,7 @@ export class Physics {
     };
     [this.leftAngle, this.leftVelocity] = move(this.leftAngle, this.leftVelocity, left ? -0.5 : 0.42, left);
     [this.rightAngle, this.rightVelocity] = move(this.rightAngle, this.rightVelocity, right ? Math.PI + 0.5 : Math.PI - 0.42, right);
+    this.orbit.tick(dt);
     if (this.relaunchIn > 0) {
       this.relaunchIn = Math.max(0, this.relaunchIn - dt);
       if (this.relaunchIn < 1e-9) { this.relaunchIn = 0; this.launch(this.launchPower); }
@@ -117,16 +122,27 @@ export class Physics {
     this.saveRemaining = Math.max(0, this.saveRemaining - dt);
     if (this.saveRemaining < 1e-9) this.saveRemaining = 0;
     const b = this.ball;
+    if (this.orbit.advance(b, dt)) return;
+    const previous = { x: b.x, y: b.y };
     b.vy += 610 * dt;
     b.vx *= Math.exp(-0.055 * dt);
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (this.inLane && b.x < shooterGate.a.x - b.radius - 4) this.inLane = false;
+    if (!this.inLane && this.orbit.tryEnter(b, previous)) return;
     if (!this.inLane) collideRail(b, shooterGate);
     for (const wall of rails) {
       if (collideRail(b, wall) && wall.bounce === 1.13) {
         b.vy -= 95; this.onRail();
       }
     }
+    for (const mouth of Object.values(entrances)) {
+      if (this.orbit.openRemaining === 0) collideRail(b, rail(mouth.x - 24, mouth.y, mouth.x + 24, mouth.y, 0.7));
+    }
+    targets.forEach((target, i) => {
+      if (!this.orbit.down[i] && collideRail(b, rail(target.x - target.width / 2, target.y, target.x + target.width / 2, target.y, 0.7), undefined, 5)) {
+        this.orbit.hitTarget(i);
+      }
+    });
     bumpers.forEach((bumper, i) => {
       this.bumperCooldown[i] = Math.max(0, this.bumperCooldown[i] - dt);
       const dx = b.x - bumper.x, dy = b.y - bumper.y, d = Math.hypot(dx, dy);

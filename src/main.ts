@@ -1,6 +1,8 @@
 import './style.css';
 import './neon.css';
 import { Effects } from './effects.ts';
+import { drawOrbit, drawShields } from './orbit-renderer.ts';
+import { entrances, targets } from './orbit.ts';
 import { Physics, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -18,7 +20,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <p class="local-note">ハイスコアはこのブラウザに保存されます</p>
     </section>
     <section class="machine-area" aria-label="ピンボール台">
-      <div class="cabinet"><div class="cabinet-top"><span>ORBIT / 01</span><span class="live-lamp">● FREE PLAY</span></div>
+      <div class="cabinet"><div class="cabinet-top"><span>ORBIT / 01</span><span id="orbit-state" class="live-lamp">SHIELD 0/3</span></div>
         <div class="playfield"><canvas id="table" width="460" height="760" aria-label="ピンボール。左右矢印でフリッパー、スペース長押しで発射。"></canvas>
           <div id="ball-save" class="ball-save" hidden></div>
           <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
@@ -31,7 +33,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
       <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
-      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">AIM A LITTLE HIGHER</span><h3>バンパーを狙おう。</h3><p>光るバンパーは100点。<br>10ヒットごとに倍率アップ。<br>最大 ×5 でスコアを伸ばそう。</p></div>
+      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">BREAK THE SHIELD</span><h3>シールドを破って周回！</h3><p>中央の的を3枚倒すと、<br>左右のランプが15秒間開放。<br>入口へ打ち込み、反対側へ！</p><p class="orbit-reward">周回 500 → 1,000 → 最大2,000点</p><p>的・バンパーは各100点。<br>バンパー10ヒットで倍率アップ。</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
   </main>
@@ -81,7 +83,7 @@ function sync() {
   $('multiplier').textContent = `×${Math.min(5, 1 + Math.floor(hits / 10))}`;
   $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
   $('balls').setAttribute('aria-label', `残り${balls}球`);
-  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
   $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
   $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
   $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
@@ -152,6 +154,30 @@ physics.onSave = () => {
 physics.onRail = () => {
   if (clock - railSoundTime < 0.1) return;
   railSoundTime = clock; score += 10; saveBest(); sync(); tone(230, 0.06, 0.025);
+};
+physics.orbit.onTarget = index => {
+  score += 100; impact = 1;
+  const target = targets[index];
+  popups.push({ x: target.x, y: target.y - 14, text: '+100', life: 0.85 });
+  if (effectsMax) effects.burst(target.x, target.y, '#ffa6d5', 0.6);
+  tone(450 + index * 180, 0.15); saveBest(); sync();
+};
+physics.orbit.onOpen = () => {
+  celebration = 1.6; celebrationText = 'GATES OPEN';
+  toast('15秒間チャンス！ 左右の ↑ 入口を狙え');
+  if (effectsMax) for (const mouth of Object.values(entrances)) effects.burst(mouth.x, mouth.y, '#86ffb8', 1.2);
+  tone(1100, 0.35);
+};
+physics.orbit.onClose = () => { toast('ゲート閉鎖。もう一度、3枚の的を狙おう'); };
+physics.orbit.onEnter = side => {
+  celebration = 1.3; celebrationText = 'ORBIT RUN';
+  toast(`${side === 'left' ? '右' : '左'}フリッパーへ戻る！ 打ち返す準備を`);
+  tone(780, 0.3); sync();
+};
+physics.orbit.onComplete = (points, side) => {
+  score += points; impact = 1; celebration = 1.5; celebrationText = `ORBIT +${points.toLocaleString()}`;
+  if (effectsMax) effects.burst(physics.ball.x, physics.ball.y, side === 'left' ? '#60ffe4' : '#d9a0ff', 0.6);
+  tone(1200, 0.25); saveBest(); sync();
 };
 function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
@@ -265,6 +291,7 @@ function draw() {
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 7, '#263f49', '#6ce8d2', 1.4);
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 2.5, '#6ce8d2');
   }
+  drawOrbit(ctx, physics.orbit, clock, effectsMax && !reducedMotion);
   for (const wall of rails) {
     line([[wall.a.x, wall.a.y + 3], [wall.b.x, wall.b.y + 3]], '#080f17', 11);
   }
@@ -292,14 +319,15 @@ function draw() {
       ctx.globalAlpha = 1;
     }
   });
-  label('✦', 228, 423, 27, '#e8b571');
+  drawShields(ctx, physics.orbit);
+  const gateOpen = physics.orbit.openRemaining > 0;
   const celebrating = celebration > 0;
-  label(celebrating ? '✦ LIGHT IT UP ✦' : 'STAY IN', 228, 463, 11, celebrating ? '#ffd889' : '#a39fcb', '600');
+  label(celebrating ? '✦ LIGHT IT UP ✦' : gateOpen ? '左右の ↑ 入口を狙え' : '中央の的を3枚倒せ', 228, 463, 11, celebrating ? '#ffd889' : '#a39fcb', '600');
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
-  label(celebrating ? celebrationText : 'ORBIT', 228, 498, celebrating ? 24 : 36, celebrating ? '#fff3ca' : '#eadcff', '800');
+  label(celebrating ? celebrationText : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 498, 25, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
   line([[183, 511], [271, 511]], '#6ce8d2', 1);
-  label('100 PTS / BUMPER', 228, 534, 9, '#718f9a');
+  label(gateOpen ? `NEXT ORBIT +${500 * Math.min(4, physics.orbit.laps + 1)}` : '3 TARGETS → 15s ORBIT', 228, 534, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];
@@ -368,6 +396,8 @@ function frame(time: number) {
   saveDisplay.hidden = state === 'ready' || state === 'over' || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
   saveDisplay.textContent = physics.relaunchIn > 0 ? '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
   $('charge').style.width = `${power * 100}%`;
+  $('orbit-state').textContent = physics.orbit.active ? '● ORBIT RUN' : physics.orbit.openRemaining > 0 ? `● OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
+  $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
   document.querySelector<HTMLElement>('.cabinet')!.style.setProperty('--impact', String(effectsMax ? impact : 0));
   document.querySelector('.scoreboard')!.classList.toggle('hit', effectsMax && impact > 0.3);
   $('chain').hidden = state === 'ready' || state === 'over' || hitStreak < 2 || clock - lastHitTime > 2.2;

@@ -135,6 +135,9 @@ kbd { background: #171a31; border-color: #73769b65; color: #bbd3ee; }
 .instruction h3, .mission h3 { color: #e4e7fc; }
 .instruction p, .mission p { color: #a4a7c7; }
 .instruction .save-tip { color: #8bd6c3; }
+.mission .orbit-reward { color: #dfb7ff; margin: 10px 0; font-size: 9px; }
+#orbit-state { font-variant-numeric: tabular-nums; letter-spacing: 1px; color: #eac1fb; }
+#orbit-state[data-mode='open'], #orbit-state[data-mode='running'] { color: #98ffc9; }
 .mission-orbit { text-shadow: 0 0 18px #fa5da760; }
 .pause-hint, footer { color: #9196bb; }
 .scoreboard.hit .score { color: #fffac7; text-shadow: 0 0 30px #f8c46770; }
