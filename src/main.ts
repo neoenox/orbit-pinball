@@ -3,7 +3,8 @@ import './neon.css';
 import { Effects } from './effects.ts';
 import { drawOrbit, drawShields } from './orbit-renderer.ts';
 import { entrances, targets } from './orbit.ts';
-import { Physics, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
+import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
+import type { Ball } from './physics.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><div class="header-actions"><span class="edition">NEON SUPERNOVA <span class="edition-dot"></span> VOL. 001</span><button id="effects" aria-pressed="true">✦ 演出 MAX</button></div></header>
@@ -26,14 +27,14 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
           <div id="toast" class="toast" role="status"></div>
         </div>
-        <div class="cabinet-bottom"><span>KEEP THE BALL IN ORBIT</span><div class="charge-track"><div id="charge"></div></div><span>✦</span></div>
+        <div class="cabinet-bottom"><span id="nova-state" role="status">LOCK 0/2 · 周回で穴を開放</span><div class="charge-track"><div id="charge"></div></div><span>✦</span></div>
       </div>
       <div class="touch-controls"><button id="left" aria-label="左フリッパー">◀ <span>LEFT</span></button><button id="launch" aria-label="長押しして離すと発射">発射 <span>HOLD</span></button><button id="right" aria-label="右フリッパー"><span>RIGHT</span> ▶</button></div>
     </section>
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
       <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
-      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">BREAK THE SHIELD</span><h3>シールドを破って周回！</h3><p>中央の的を3枚倒すと、<br>左右のランプが15秒間開放。<br>入口へ打ち込み、反対側へ！</p><p class="orbit-reward">周回 500 → 1,000 → 最大2,000点</p><p>的・バンパーは各100点。<br>バンパー10ヒットで倍率アップ。</p></div>
+      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">2球保管 → 3球同時プレイ<br>超新星中は周回ごとに5,000点！</p><p>保管時は残り球を消費せず補充。<br>通常周回は500〜2,000点。<br>バンパー10ヒットで倍率アップ。</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
   </main>
@@ -57,7 +58,7 @@ let railSoundTime = 0;
 let hitStreak = 0, lastHitTime = -Infinity;
 let impact = 0, launchGlow = 0, celebration = 0;
 let celebrationText = '';
-const trail: { x: number; y: number }[] = [];
+const trails = new Map<Ball, { x: number; y: number }[]>();
 const flashes = [0, 0, 0];
 const flipperFlashes = [0, 0];
 const popups: { x: number; y: number; text: string; life: number }[] = [];
@@ -83,7 +84,7 @@ function sync() {
   $('multiplier').textContent = `×${Math.min(5, 1 + Math.floor(hits / 10))}`;
   $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
   $('balls').setAttribute('aria-label', `残り${balls}球`);
-  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.multiball ? `SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.busy ? 'BALL LOCKED' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
   $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
   $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
   $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
@@ -91,10 +92,10 @@ function sync() {
 function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
-  state = 'playing'; score = 0; hits = 0; balls = 3; clearInput(); trail.length = 0; effects.clear();
+  state = 'playing'; score = 0; hits = 0; balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
   hitStreak = 0; lastHitTime = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
-  flashes.fill(0); physics.resetBall(); $('overlay').classList.add('hidden'); sync();
+  flashes.fill(0); physics.resetGame(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
 function pause() {
@@ -108,7 +109,7 @@ function pause() {
   sync();
 }
 function beginCharge() {
-  if (state !== 'playing' || physics.launched || physics.relaunchIn > 0 || charging) return;
+  if (state !== 'playing' || physics.launched || physics.relaunchIn > 0 || physics.busy || physics.multiball || charging) return;
   charging = true; power = 0; tone(130, 0.08);
 }
 function releaseCharge() {
@@ -146,7 +147,7 @@ physics.onLaunch = () => {
   sync();
 };
 physics.onSave = () => {
-  clearInput(); trail.length = 0; popups.length = 0; hitStreak = 0; lastHitTime = -Infinity;
+  clearInput(); trails.clear(); popups.length = 0; hitStreak = 0; lastHitTime = -Infinity;
   celebration = 1.3; celebrationText = 'BALL SAVED';
   if (effectsMax) effects.burst(228, 707, '#72ffd9', 1.2);
   toast('BALL SAVED! 球数そのまま、自動で再発射'); tone(880, 0.3); sync();
@@ -174,16 +175,31 @@ physics.orbit.onEnter = side => {
   toast(`${side === 'left' ? '右' : '左'}フリッパーへ戻る！ 打ち返す準備を`);
   tone(780, 0.3); sync();
 };
-physics.orbit.onComplete = (points, side) => {
-  score += points; impact = 1; celebration = 1.5; celebrationText = `ORBIT +${points.toLocaleString()}`;
-  if (effectsMax) effects.burst(physics.ball.x, physics.ball.y, side === 'left' ? '#60ffe4' : '#d9a0ff', 0.6);
+physics.orbit.onComplete = (points, side, ball, jackpot) => {
+  score += points; impact = 1; celebration = 1.5; celebrationText = `${jackpot ? 'JACKPOT' : 'ORBIT'} +${points.toLocaleString()}`;
+  if (effectsMax) effects.burst(ball.x, ball.y, jackpot ? '#ffd27c' : side === 'left' ? '#60ffe4' : '#d9a0ff', jackpot ? 1.5 : 0.6);
   tone(1200, 0.25); saveBest(); sync();
 };
+physics.onBlackHoleReady = () => { toast('BLACK HOLE OPEN! 中央の穴へ入れて球を保管'); tone(330, 0.45); };
+physics.onLock = count => {
+  clearInput(); trails.clear(); celebration = 1.3; celebrationText = `BALL LOCKED ${count}/2`;
+  toast(count === 1 ? '1球保管！ 球数そのまま補充。もう一度周回しよう' : '2球保管！ 超新星、解放！');
+  if (effectsMax) effects.burst(BLACK_HOLE.x, BLACK_HOLE.y, '#d995ff', 1.2);
+  tone(180, 0.6); sync();
+};
+physics.onMultiballStart = () => {
+  trails.clear(); impact = 1; celebration = 2.3; celebrationText = 'SUPERNOVA';
+  toast('3球同時！ ゲート常時開放 · 周回で5,000点');
+  if (effectsMax) { effects.burst(228, 465, '#ffd27c', 2); effects.burst(228, 320, '#ff75d0', 1.5); shake = 5; }
+  tone(1500, 0.7); sync();
+};
+physics.onMultiballEnd = () => { toast('超新星終了。残った1球で続行！'); sync(); };
+physics.onBallLost = remaining => { if (remaining > 1) toast(`超新星継続！ あと${remaining}球 · 周回で5,000点`); sync(); };
 function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
 }
 physics.onDrain = () => {
-  balls--; clearInput(); trail.length = 0; hitStreak = 0; lastHitTime = -Infinity; tone(150, 0.4);
+  balls--; clearInput(); trails.clear(); hitStreak = 0; lastHitTime = -Infinity; tone(150, 0.4);
   if (balls === 0) {
     state = 'over'; $('overlay').classList.remove('hidden');
     $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
@@ -201,7 +217,7 @@ function syncEffects() {
   document.body.classList.toggle('light-effects', !effectsMax);
   $('effects').textContent = `✦ 演出 ${effectsMax ? 'MAX' : 'LIGHT'}`;
   $('effects').setAttribute('aria-pressed', String(effectsMax));
-  effects.clear(); trail.length = 0; shake = 0;
+  effects.clear(); trails.clear(); shake = 0;
 }
 $('effects').addEventListener('click', () => { effectsMax = !effectsMax; syncEffects(); });
 motionPreference.addEventListener('change', event => {
@@ -320,14 +336,26 @@ function draw() {
     }
   });
   drawShields(ctx, physics.orbit);
-  const gateOpen = physics.orbit.openRemaining > 0;
+  const gateOpen = physics.orbit.isOpen;
   const celebrating = celebration > 0;
-  label(celebrating ? '✦ LIGHT IT UP ✦' : gateOpen ? '左右の ↑ 入口を狙え' : '中央の的を3枚倒せ', 228, 463, 11, celebrating ? '#ffd889' : '#a39fcb', '600');
-  ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
-  label(celebrating ? celebrationText : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 498, 25, celebrating ? '#fff3ca' : '#eadcff', '800');
+  const holeActive = physics.blackHoleReady || physics.busy || physics.multiball;
+  const holeColor = physics.multiball ? '#ffd27c' : holeActive ? '#df9cff' : '#665a89';
+  ctx.save(); ctx.translate(BLACK_HOLE.x, BLACK_HOLE.y);
+  if (effectsMax) { ctx.shadowColor = holeColor; ctx.shadowBlur = holeActive ? 24 : 4; }
+  circle(0, 0, 23, '#060511', holeColor, 2);
   ctx.shadowBlur = 0;
-  line([[183, 511], [271, 511]], '#6ce8d2', 1);
-  label(gateOpen ? `NEXT ORBIT +${500 * Math.min(4, physics.orbit.laps + 1)}` : '3 TARGETS → 15s ORBIT', 228, 534, 9, '#acb3d1');
+  ctx.rotate(effectsMax && !reducedMotion ? clock * (holeActive ? 1.8 : 0.2) : 0);
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.ellipse(0, 0, 30, 12, i * Math.PI / 3, 0, Math.PI * 1.5);
+    ctx.strokeStyle = holeColor; ctx.globalAlpha = holeActive ? 0.7 : 0.25; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  ctx.restore();
+  for (let i = 0; i < 2; i++) circle(217 + i * 22, 465, 4, i < physics.lockedBalls ? '#ffe5a5' : '#27203c', '#a07ac5');
+  label(physics.multiball ? `${physics.liveBallCount} BALLS · 周回で JACKPOT` : physics.blackHoleReady ? '↓ BLACK HOLE OPEN · ここを狙え ↓' : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`, 228, 439, 9, holeColor, '700');
+  ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
+  label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
+  ctx.shadowBlur = 0;
+  label(physics.multiball ? 'JACKPOT +5,000 · GATES ALWAYS OPEN' : gateOpen ? `NEXT ORBIT +${500 * Math.min(4, physics.orbit.laps + 1)}` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];
@@ -344,7 +372,7 @@ function draw() {
   if (effectsMax) {
     effects.draw(ctx);
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    for (let i = 1; i < trail.length; i++) {
+    for (const trail of trails.values()) for (let i = 1; i < trail.length; i++) {
       const intensity = i / trail.length;
       ctx.globalAlpha = intensity * 0.55;
       line([[trail[i - 1].x, trail[i - 1].y], [trail[i].x, trail[i].y]], i < trail.length / 2 ? '#a475ff' : '#59e8ff', intensity * 11, 8);
@@ -354,12 +382,13 @@ function draw() {
     ctx.restore();
   }
   ctx.globalAlpha = 1;
-  if (state !== 'over') {
-    const { x, y, radius } = physics.ball;
-    const by = !physics.launched ? y + pull : y;
+  if (state !== 'over') for (const ball of physics.balls) {
+    const { x, y } = ball;
+    const radius = ball.radius * (physics.captureRemaining > 0 ? Math.max(0.1, physics.captureRemaining / 0.65) : 1);
+    const by = ball === physics.ball && !physics.launched ? y + pull : y;
     circle(x + 3, by + 5, radius + 1, '#07121c');
     if (effectsMax) {
-      ctx.shadowColor = '#8dffff'; ctx.shadowBlur = 18;
+      ctx.shadowColor = physics.multiball ? '#ffd27c' : '#8dffff'; ctx.shadowBlur = 18;
       circle(x, by, radius + 1, '#4eb8dd77'); ctx.shadowBlur = 0;
       if (charging) circle(x, by, radius + 5 + power * 5, 'transparent', '#e29bff', 2);
     }
@@ -381,7 +410,12 @@ function frame(time: number) {
     if (charging) power = Math.min(1, power + dt * 0.85);
     accumulator += dt;
     while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
-    if (physics.launched && effectsMax) { trail.push({ x: physics.ball.x, y: physics.ball.y }); if (trail.length > 18) trail.shift(); }
+    const currentBalls = physics.balls;
+    for (const ball of trails.keys()) if (!currentBalls.includes(ball)) trails.delete(ball);
+    if (physics.launched && effectsMax) for (const ball of currentBalls) {
+      const trail = trails.get(ball) ?? [];
+      trail.push({ x: ball.x, y: ball.y }); if (trail.length > 18) trail.shift(); trails.set(ball, trail);
+    }
     effects.update(dt);
     impact = Math.max(0, impact - dt * 3);
     launchGlow = Math.max(0, launchGlow - dt * 1.7);
@@ -393,10 +427,13 @@ function frame(time: number) {
     toastTime -= dt; if (toastTime <= 0) $('toast').classList.remove('visible');
   } else accumulator = 0;
   const saveDisplay = $('ball-save');
-  saveDisplay.hidden = state === 'ready' || state === 'over' || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
+  saveDisplay.hidden = state === 'ready' || state === 'over' || physics.busy || physics.multiball || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
   saveDisplay.textContent = physics.relaunchIn > 0 ? '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
   $('charge').style.width = `${power * 100}%`;
-  $('orbit-state').textContent = physics.orbit.active ? '● ORBIT RUN' : physics.orbit.openRemaining > 0 ? `● OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
+  $('nova-state').textContent = physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
+  canvas.dataset.ballCount = String(physics.balls.length);
+  document.body.classList.toggle('supernova', physics.multiball);
+  $('orbit-state').textContent = physics.multiball ? '✦ JACKPOT +5,000' : physics.orbit.active ? '● ORBIT RUN' : physics.orbit.openRemaining > 0 ? `● OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
   document.querySelector<HTMLElement>('.cabinet')!.style.setProperty('--impact', String(effectsMax ? impact : 0));
   document.querySelector('.scoreboard')!.classList.toggle('hit', effectsMax && impact > 0.3);

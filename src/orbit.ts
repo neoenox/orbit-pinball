@@ -26,31 +26,42 @@ function smooth(points: Vec[]): Vec[] {
 }
 const controlPoints = (side: Side) => side === 'left' ? leftRoute : leftRoute.map(p => ({ x: 455 - p.x, y: p.y }));
 export const orbitPaths = { left: smooth(controlPoints('left')), right: smooth(controlPoints('right')) };
-type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: number };
+type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: number; jackpot: boolean };
 
 export class OrbitCourse {
   down = [false, false, false];
   openRemaining = 0;
   laps = 0;
-  active: Lap | null = null;
+  private flights = new Map<Ball, Lap>();
+  supernova = false;
+  get active(): Lap | null { return this.flights.values().next().value ?? null; }
+  get isOpen() { return this.supernova || this.openRemaining > 0; }
+  hasFlight(ball: Ball) { return this.flights.has(ball); }
+  hasFlightOn(side: Side) { return [...this.flights.values()].some(lap => lap.side === side); }
   onTarget: (index: number) => void = () => {};
   onOpen: () => void = () => {};
   onClose: () => void = () => {};
   onEnter: (side: Side) => void = () => {};
-  onComplete: (points: number, side: Side) => void = () => {};
+  onComplete: (points: number, side: Side, ball: Ball, jackpot: boolean) => void = () => {};
+  onNormalLap: () => void = () => {};
 
   reset() {
-    this.down.fill(false); this.openRemaining = 0; this.laps = 0; this.active = null;
+    this.down.fill(false); this.openRemaining = 0; this.laps = 0; this.flights.clear(); this.supernova = false;
+  }
+
+  setSupernova(enabled: boolean) {
+    this.supernova = enabled; this.down.fill(enabled); this.openRemaining = 0; this.laps = 0;
+    // A surviving ball already on a ramp completes the lap at its admitted award.
   }
 
   hitTarget(index: number) {
-    if (index < 0 || index >= this.down.length || this.down[index] || this.openRemaining > 0) return;
+    if (index < 0 || index >= this.down.length || this.down[index] || this.isOpen) return;
     this.down[index] = true; this.onTarget(index);
     if (this.down.every(Boolean)) { this.openRemaining = 15; this.laps = 0; this.onOpen(); }
   }
 
   tick(dt: number) {
-    if (this.openRemaining <= 0) return;
+    if (this.supernova || this.openRemaining <= 0) return;
     this.openRemaining = Math.max(0, this.openRemaining - dt);
     if (this.openRemaining < 1e-9) {
       this.openRemaining = 0; this.down.fill(false); this.laps = 0; this.onClose();
@@ -58,20 +69,20 @@ export class OrbitCourse {
   }
 
   tryEnter(ball: Ball, previous: Vec): boolean {
-    if (this.openRemaining <= 0 || this.active || ball.vy >= -80) return false;
+    if (!this.isOpen || this.hasFlight(ball) || ball.vy >= -80) return false;
     for (const side of ['left', 'right'] as const) {
       const mouth = entrances[side];
       if (previous.y < mouth.y || ball.y > mouth.y || Math.abs(ball.x - mouth.x) > 24 - ball.radius) continue;
       // Use the actual crossing point so an off-centre shot never snaps to a rail.
       const path = smooth([{ x: ball.x, y: ball.y }, ...controlPoints(side).slice(1)]);
-      this.active = { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: 500 * Math.min(4, this.laps + 1) };
+      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: this.supernova ? 5000 : 500 * Math.min(4, this.laps + 1), jackpot: this.supernova });
       this.onEnter(side); return true;
     }
     return false;
   }
 
   advance(ball: Ball, dt: number): boolean {
-    const lap = this.active;
+    const lap = this.flights.get(ball);
     if (!lap) return false;
     let remaining = lap.speed * dt;
     while (lap.segment < lap.path.length - 1) {
@@ -90,9 +101,10 @@ export class OrbitCourse {
     const end = lap.path[lap.path.length - 1];
     ball.x = end.x; ball.y = end.y;
     ball.vx = lap.side === 'left' ? -130 : 130; ball.vy = 290;
-    this.active = null;
+    this.flights.delete(ball);
     if (this.openRemaining > 0) this.laps++;
-    this.onComplete(lap.award, lap.side);
+    if (!lap.jackpot) this.onNormalLap();
+    this.onComplete(lap.award, lap.side, ball, lap.jackpot);
     return true;
   }
 }

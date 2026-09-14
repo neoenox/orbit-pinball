@@ -2,11 +2,11 @@ import { entrances, orbitPaths, targets, type OrbitCourse } from './orbit.ts';
 
 export function drawOrbit(ctx: CanvasRenderingContext2D, course: OrbitCourse, clock: number, animate: boolean) {
   ctx.save();
-  const open = course.openRemaining > 0;
+  const open = course.isOpen;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const side of ['left', 'right'] as const) {
     const points = orbitPaths[side];
-    const active = course.active?.side === side;
+    const active = course.hasFlightOn(side);
     const color = side === 'left' ? '#61ffe4' : '#d9a0ff';
     ctx.beginPath(); points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
     ctx.strokeStyle = open || active ? color : '#666887'; ctx.globalAlpha = open || active ? 0.55 : 0.28;
@@ -36,7 +36,7 @@ export function drawOrbit(ctx: CanvasRenderingContext2D, course: OrbitCourse, cl
     }
     ctx.shadowBlur = 0; ctx.textAlign = 'center'; ctx.font = '700 9px "Segoe UI", sans-serif';
     ctx.fillStyle = open ? '#c9ffcf' : '#e5a5c3';
-    ctx.fillText(open ? 'SHOOT ↑' : 'LOCKED', mouth.x, mouth.y - 17);
+    ctx.fillText(course.supernova ? 'JACKPOT ↑' : open ? 'SHOOT ↑' : 'LOCKED', mouth.x, mouth.y - 17);
     ctx.fillStyle = '#b9b1df'; ctx.font = '8px "Segoe UI", sans-serif';
     ctx.fillText(side === 'left' ? 'L ORBIT' : 'R ORBIT', mouth.x, mouth.y + 21);
     if (open) {

@@ -115,6 +115,10 @@ h1>span {
 .live-lamp { color: #6dfdd4; text-shadow: 0 0 8px #6dfdd480; }
 .playfield { border-color: #b190ef6b; }
 .cabinet-bottom { color: #b0a7d7; }
+#nova-state { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.supernova .cabinet { border-color: #ffd27c; }
+.supernova #nova-state, .supernova #orbit-state { color: #ffe0a1; }
+.supernova:not(.light-effects) .cabinet { box-shadow: -6px 0 30px #ff6abd55, 6px 0 30px #ffc86c55, 0 8px 0 #141327; }
 .charge-track { background: #373152; height: 4px; }
 #charge { background: linear-gradient(90deg, #3afad2, #d69aff, #ff64a9); box-shadow: 0 0 12px #fd72bd; }
 .cabinet-bottom>span:last-child { color: #fda8d7; }

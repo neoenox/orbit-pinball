@@ -58,7 +58,7 @@ test('physical targets open ramps, laps score, pause freezes the course, and exp
     const { Physics } = await import('/src/physics.ts');
     const original = Physics.prototype.step;
     Physics.prototype.step = function (...args: [number, boolean, boolean]) {
-      this.ball.x = 228; this.ball.y = 450; this.ball.vx = 0; this.ball.vy = 0;
+      this.ball.x = 228; this.ball.y = 550; this.ball.vx = 0; this.ball.vy = 0;
       const result = original.apply(this, args);
       if (this.orbit.openRemaining === 0) Physics.prototype.step = original;
       return result;
