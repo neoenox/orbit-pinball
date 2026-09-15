@@ -8,8 +8,9 @@ test('keyboard launch, scoring, pause, three balls, restart and saved best', asy
   await page.clock.install();
   await page.locator('#overlay-start').click();
   await expect(page.locator('#status')).toHaveText('HOLD SPACE');
+  // Charge past saturation so per-frame dt capping under worker contention cannot dip below the threshold.
   await page.keyboard.down('Space');
-  await page.clock.runFor(800);
+  await page.clock.runFor(1200);
   expect(parseFloat(await page.locator('#charge').evaluate(e => (e as HTMLElement).style.width))).toBeGreaterThan(50);
   await page.keyboard.up('Space');
   await expect(page.locator('#status')).toHaveText('IN ORBIT');

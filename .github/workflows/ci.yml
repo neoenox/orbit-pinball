@@ -22,7 +22,13 @@ jobs:
         run: npm ci
 
       # The Playwright config runs against the msedge channel, the same
-      # browser used locally; install it plus its system dependencies.
+      # browser used locally. Cache the browser download keyed on the
+      # lockfile; the install step then only refreshes system dependencies.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: msplaywright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Install Microsoft Edge for Playwright
         run: npx playwright install --with-deps msedge
 
