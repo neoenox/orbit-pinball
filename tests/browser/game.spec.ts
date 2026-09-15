@@ -105,8 +105,10 @@ test('ball save preserves lives and score, pauses its timers and relaunches only
   await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
   await expect(page.locator('#score')).toHaveText(score!);
   await expect(page.locator('#toast')).toContainText('自動で再発射');
+  // Pause before the screenshot: real frames can advance the relaunch countdown on slow runners.
+  await page.keyboard.press('p');
   await page.screenshot({ path: 'test-results/ball-save.png', fullPage: true });
-  await page.keyboard.press('p'); await page.clock.runFor(3000);
+  await page.clock.runFor(3000);
   await expect(page.locator('#ball-save')).toContainText('BALL SAVED');
   await page.keyboard.press('p'); await page.clock.runFor(800);
   await expect(page.locator('#status')).toHaveText('IN ORBIT');
