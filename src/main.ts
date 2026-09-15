@@ -64,7 +64,7 @@ let left = false, right = false, charging = false, power = 0, sound = true;
 let audio: AudioContext | undefined;
 let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
 let railSoundTime = 0;
-let hitStreak = 0, lastHitTime = -Infinity, lastDanger = -Infinity;
+let lastDanger = -Infinity;
 let impact = 0, launchGlow = 0, celebration = 0;
 let celebrationText = '';
 const trails = new Map<Ball, { x: number; y: number }[]>();
@@ -110,7 +110,7 @@ function clearInput() { left = false; right = false; charging = false; power = 0
 function start() {
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
-  hitStreak = 0; lastHitTime = -Infinity; lastDanger = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
+  lastDanger = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
   flashes.fill(0); physics.resetGame(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
@@ -140,13 +140,13 @@ physics.onHit = i => {
   const result = scoring.bumper(lastBall);
   score += result.points;
   applyScoring(result);
-  hitStreak = clock - lastHitTime <= 2.2 ? hitStreak + 1 : 1; lastHitTime = clock;
+  const { streak } = scoring.registerHit(clock);
   flashes[i] = 1; shake = effectsMax ? 3 : 0; impact = 1;
   const bumper = bumpers[i];
-  popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${lastBall ? 'LAST×2 ' : ''}${hitStreak > 1 ? `${hitStreak} HITS · ` : ''}+${result.points}`, life: 0.85 });
-  if (effectsMax) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(hitStreak, 5) * 0.13);
-  if (hitStreak >= 2) { celebration = 1.1; celebrationText = `${hitStreak} HIT CHAIN`; }
-  saveBest(); sync(); tone(600 + i * 180 + Math.min(hitStreak - 1, 6) * 55, 0.16);
+  popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${lastBall ? 'LAST×2 ' : ''}${streak > 1 ? `${streak} HITS · ` : ''}+${result.points}`, life: 0.85 });
+  if (effectsMax) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(streak, 5) * 0.13);
+  if (streak >= 2) { celebration = 1.1; celebrationText = `${streak} HIT CHAIN`; }
+  saveBest(); sync(); tone(600 + i * 180 + Math.min(streak - 1, 6) * 55, 0.16);
 };
 physics.onFlipper = (isLeft, speed, x = 0, y = 0) => {
   flipperFlashes[isLeft ? 0 : 1] = Math.min(1, speed / 650);
@@ -169,7 +169,7 @@ physics.onLaunch = () => {
   sync();
 };
 physics.onSave = () => {
-  clearInput(); trails.clear(); popups.length = 0; hitStreak = 0; lastHitTime = -Infinity;
+  clearInput(); trails.clear(); popups.length = 0; scoring.resetChain();
   celebration = 1.3; celebrationText = 'BALL SAVED';
   if (effectsMax) effects.burst(228, 707, '#72ffd9', 1.2);
   toast('BALL SAVED! 球数そのまま、自動で再発射'); tone(880, 0.3); sync();
@@ -227,7 +227,7 @@ function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
 }
 physics.onDrain = () => {
-  balls--; clearInput(); trails.clear(); hitStreak = 0; lastHitTime = -Infinity; tone(150, 0.4);
+  balls--; clearInput(); trails.clear(); scoring.resetChain(); tone(150, 0.4);
   if (balls === 0) {
     state = 'over'; $('overlay').classList.remove('hidden');
     $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
@@ -478,8 +478,8 @@ function frame(time: number) {
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
   cabinet.style.setProperty('--impact', String(effectsMax ? impact : 0));
   scoreboard.classList.toggle('hit', effectsMax && impact > 0.3);
-  $('chain').hidden = state === 'ready' || state === 'over' || hitStreak < 2 || clock - lastHitTime > 2.2;
-  $('chain').textContent = `✦ ${hitStreak} HIT CHAIN`;
+  $('chain').hidden = state === 'ready' || state === 'over' || !scoring.isChainActive(clock);
+  $('chain').textContent = `✦ ${scoring.hitStreak} HIT CHAIN`;
   $('left').classList.toggle('pressed', left); $('right').classList.toggle('pressed', right);
   draw(); requestAnimationFrame(frame);
 }
