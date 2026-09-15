@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Scoring, BUMPER_POINTS, DANGER_BONUS, MAX_MULTIPLIER, CHAIN_WINDOW_SECONDS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, ORBIT_CHARGE_HITS, SUPERNOVA_JACKPOT, orbitAward } from '../src/scoring.ts';
+import { Scoring, BUMPER_POINTS, DANGER_BONUS, DANGER_COOLDOWN_SECONDS, MAX_MULTIPLIER, CHAIN_WINDOW_SECONDS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, ORBIT_CHARGE_HITS, SUPERNOVA_JACKPOT, orbitAward } from '../src/scoring.ts';
 
 test('the multiplier grows one tier per ten bumper hits and caps at five', () => {
   const scoring = new Scoring();
@@ -62,6 +62,23 @@ test('the DANGER bonus is a flat award, doubled on the last ball and independent
   assert.equal(scoring.multiplier, 5);
   assert.equal(scoring.danger(false), DANGER_BONUS, 'the multiplier must not inflate the DANGER award');
   assert.equal(scoring.danger(true), 100);
+});
+
+test('tryDanger pays after the cooldown elapses and blocked attempts do not extend it', () => {
+  const scoring = new Scoring();
+  assert.equal(scoring.tryDanger(0, false), DANGER_BONUS, 'the first DANGER always pays');
+  assert.equal(scoring.tryDanger(0.5, false), null, 'within the cooldown nothing pays');
+  assert.equal(scoring.tryDanger(DANGER_COOLDOWN_SECONDS, false), null, 'exactly 1.5 s later is still too soon');
+  assert.equal(scoring.tryDanger(DANGER_COOLDOWN_SECONDS + 0.001, false), DANGER_BONUS, 'the cooldown opens after 1.5 s');
+  scoring.resetDanger();
+  assert.equal(scoring.tryDanger(DANGER_COOLDOWN_SECONDS + 0.002, false), DANGER_BONUS, 'resetDanger reopens the gate immediately');
+  const scoring2 = new Scoring();
+  assert.equal(scoring2.tryDanger(10, true), 100, 'last-ball doubling flows through the gate');
+  assert.equal(scoring2.tryDanger(10.5, true), null);
+  assert.equal(scoring2.tryDanger(10.6, true), null);
+  assert.equal(scoring2.tryDanger(12.2, true), 100, 'failed attempts must not push the cooldown back');
+  scoring2.reset();
+  assert.equal(scoring2.tryDanger(12.3, false), DANGER_BONUS, 'reset also clears the DANGER cooldown');
 });
 
 test('reset returns to a fresh ×1 game with no pending tier increase', () => {

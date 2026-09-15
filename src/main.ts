@@ -64,7 +64,6 @@ let left = false, right = false, charging = false, power = 0, sound = true;
 let audio: AudioContext | undefined;
 let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
 let railSoundTime = 0;
-let lastDanger = -Infinity;
 let impact = 0, launchGlow = 0, celebration = 0;
 let celebrationText = '';
 const trails = new Map<Ball, { x: number; y: number }[]>();
@@ -110,7 +109,7 @@ function clearInput() { left = false; right = false; charging = false; power = 0
 function start() {
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
-  lastDanger = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
+  popups.length = 0; shake = 0; flipperFlashes.fill(0);
   flashes.fill(0); physics.resetGame(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
@@ -152,13 +151,14 @@ physics.onFlipper = (isLeft, speed, x = 0, y = 0) => {
   flipperFlashes[isLeft ? 0 : 1] = Math.min(1, speed / 650);
   tone(180 + Math.min(500, speed * 0.35), 0.08, 0.025);
   // DANGER SAVE: a deep catch with a moving flipper earns a flat bonus (doubled on the last ball).
-  if (y > 620 && speed > 150 && clock - lastDanger > 1.5) {
-    lastDanger = clock;
-    const bonus = scoring.danger(balls === 1);
-    score += bonus;
-    popups.push({ x, y: y - 22, text: `DANGER +${bonus}`, life: 0.9 });
-    if (effectsMax) effects.burst(x, y, '#ffd27c', 0.5);
-    saveBest(); sync(); tone(980, 0.12);
+  if (y > 620 && speed > 150) {
+    const bonus = scoring.tryDanger(clock, balls === 1);
+    if (bonus !== null) {
+      score += bonus;
+      popups.push({ x, y: y - 22, text: `DANGER +${bonus}`, life: 0.9 });
+      if (effectsMax) effects.burst(x, y, '#ffd27c', 0.5);
+      saveBest(); sync(); tone(980, 0.12);
+    }
   }
 };
 physics.onLaunch = () => {

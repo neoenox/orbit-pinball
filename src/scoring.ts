@@ -4,6 +4,8 @@ export const BUMPER_POINTS = 100;
 export const RAIL_BONUS = 10;
 export const TARGET_POINTS = 100;
 export const DANGER_BONUS = 50;
+/** Minimum simulation seconds between DANGER awards. */
+export const DANGER_COOLDOWN_SECONDS = 1.5;
 export const MAX_MULTIPLIER = 5;
 export const HITS_PER_MULTIPLIER_TIER = 10;
 /** While only the last ball remains, bumper and DANGER awards are doubled. */
@@ -37,8 +39,9 @@ export class Scoring {
   private hits = 0;
   private streak = 0;
   private lastHitAt = -Infinity;
+  private lastDangerAt = -Infinity;
 
-  reset() { this.hits = 0; this.resetChain(); }
+  reset() { this.hits = 0; this.resetChain(); this.resetDanger(); }
 
   /** Clears the chain without touching the multiplier, e.g. on ball save or drain. */
   resetChain() { this.streak = 0; this.lastHitAt = -Infinity; }
@@ -75,8 +78,18 @@ export class Scoring {
     return { ...this.addHits(1), points };
   }
 
-  /** Deep-catch DANGER award; pure — the 1.5 s cooldown stays with the game loop. */
+  /** Deep-catch DANGER award, doubled on the last ball; the pure math behind tryDanger. */
   danger(lastBall: boolean) {
     return DANGER_BONUS * (lastBall ? LAST_BALL_BONUS : 1);
   }
+
+  /** Pays DANGER when the cooldown since the last award has elapsed; failed attempts don't extend it. */
+  tryDanger(at: number, lastBall: boolean): number | null {
+    if (at - this.lastDangerAt <= DANGER_COOLDOWN_SECONDS) return null;
+    this.lastDangerAt = at;
+    return this.danger(lastBall);
+  }
+
+  /** Clears the DANGER cooldown, e.g. at game start. */
+  resetDanger() { this.lastDangerAt = -Infinity; }
 }
