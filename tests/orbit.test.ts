@@ -58,7 +58,7 @@ test('both ramps are continuous and return the ball to the opposite flipper', ()
     const p = new Physics(); let awarded = 0;
     p.launched = true; p.inLane = false;
     [0, 1, 2].forEach(i => p.orbit.hitTarget(i));
-    p.orbit.onComplete = points => awarded += points;
+    p.orbit.onComplete = award => awarded += award.points;
     const mouth = entrances[side];
     p.ball = { x: mouth.x + 3, y: mouth.y + 1, vx: 0, vy: -500, radius: 8 };
     let top = false;
@@ -78,7 +78,7 @@ test('left laps escalate while right laps pay a fixed charge without growing esc
   const p = new Physics();
   p.launched = true; p.inLane = false; [0, 1, 2].forEach(i => p.orbit.hitTarget(i));
   const awards: number[] = [];
-  p.orbit.onComplete = points => awards.push(points);
+  p.orbit.onComplete = award => awards.push(award.points);
   const run = (x: number) => {
     const n = awards.length;
     p.ball = { x, y: entrances.left.y + 1, vx: 0, vy: -850, radius: 8 };
@@ -97,7 +97,7 @@ test('an admitted lap finishes even if the gate expires midway', () => {
   const p = new Physics(); let points = 0;
   p.launched = true; p.inLane = false;
   [0, 1, 2].forEach(i => p.orbit.hitTarget(i)); p.orbit.tick(14.9);
-  p.orbit.onComplete = award => points += award;
+  p.orbit.onComplete = award => points += award.points;
   p.ball = { x: entrances.left.x, y: entrances.left.y + 1, vx: 0, vy: -500, radius: 8 };
   for (let i = 0; i < 1200 && points === 0; i++) p.step(STEP, false, false);
   assert.equal(points, 500); assert.equal(p.orbit.openRemaining, 0); assert.equal(p.orbit.active, null);
@@ -106,7 +106,7 @@ test('an admitted lap finishes even if the gate expires midway', () => {
 test('repeated laps in one opening increase awards up to 2000 points', () => {
   const p = new Physics(); const awards: number[] = [];
   p.launched = true; p.inLane = false; [0, 1, 2].forEach(i => p.orbit.hitTarget(i));
-  p.orbit.onComplete = points => awards.push(points);
+  p.orbit.onComplete = award => awards.push(award.points);
   for (let lap = 0; lap < 5; lap++) {
     p.ball = { x: entrances.left.x, y: entrances.left.y + 1, vx: 0, vy: -850, radius: 8 };
     for (let i = 0; i < 1000 && awards.length === lap; i++) p.step(STEP, false, false);

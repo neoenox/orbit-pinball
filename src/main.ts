@@ -5,7 +5,7 @@ import { drawOrbit, drawShields } from './orbit-renderer.ts';
 import { entrances, targets } from './orbit.ts';
 import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 import type { Ball } from './physics.ts';
-import { Scoring } from './scoring.ts';
+import { Scoring, ORBIT_CHARGE_HITS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, SUPERNOVA_JACKPOT, RAIL_BONUS, TARGET_POINTS } from './scoring.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><div class="header-actions"><span class="edition">NEON SUPERNOVA <span class="edition-dot"></span> VOL. 001</span><button id="effects" aria-pressed="true">✦ 演出 MAX</button></div></header>
@@ -176,10 +176,10 @@ physics.onSave = () => {
 };
 physics.onRail = () => {
   if (clock - railSoundTime < 0.1) return;
-  railSoundTime = clock; score += 10; saveBest(); sync(); tone(230, 0.06, 0.025);
+  railSoundTime = clock; score += RAIL_BONUS; saveBest(); sync(); tone(230, 0.06, 0.025);
 };
 physics.orbit.onTarget = index => {
-  score += 100; impact = 1;
+  score += TARGET_POINTS; impact = 1;
   const target = targets[index];
   popups.push({ x: target.x, y: target.y - 14, text: '+100', life: 0.85 });
   if (effectsMax) effects.burst(target.x, target.y, '#ffa6d5', 0.6);
@@ -197,15 +197,15 @@ physics.orbit.onEnter = side => {
   toast(`${side === 'left' ? '右' : '左'}フリッパーへ戻る！ 打ち返す準備を`);
   tone(780, 0.3); sync();
 };
-physics.orbit.onComplete = (points, side, ball, jackpot) => {
-  score += points; impact = 1; celebration = 1.5;
-  if (!jackpot && side === 'right') {
-    applyScoring(scoring.addHits(5));
-    celebrationText = `CHARGE +${points.toLocaleString()} · 倍率+5`;
+physics.orbit.onComplete = (award, ball) => {
+  score += award.points; impact = 1; celebration = 1.5;
+  if (award.charge) {
+    applyScoring(scoring.addHits(ORBIT_CHARGE_HITS));
+    celebrationText = `CHARGE +${award.points.toLocaleString()} · 倍率+${ORBIT_CHARGE_HITS}`;
   } else {
-    celebrationText = `${jackpot ? 'JACKPOT' : 'ORBIT'} +${points.toLocaleString()}`;
+    celebrationText = `${award.jackpot ? 'JACKPOT' : 'ORBIT'} +${award.points.toLocaleString()}`;
   }
-  if (effectsMax) effects.burst(ball.x, ball.y, jackpot ? '#ffd27c' : side === 'left' ? '#60ffe4' : '#d9a0ff', jackpot ? 1.5 : 0.6);
+  if (effectsMax) effects.burst(ball.x, ball.y, award.jackpot ? '#ffd27c' : award.side === 'left' ? '#60ffe4' : '#d9a0ff', award.jackpot ? 1.5 : 0.6);
   tone(1200, 0.25); saveBest(); sync();
 };
 physics.onBlackHoleReady = () => { toast('BLACK HOLE OPEN! 中央の穴へ入れて球を保管'); tone(330, 0.45); };
@@ -396,7 +396,7 @@ function draw() {
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
   label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
-  label(physics.multiball ? 'JACKPOT +5,000 · GATES ALWAYS OPEN' : gateOpen ? `L +${500 * Math.min(4, physics.orbit.laps + 1)} · R 1000+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
+  label(physics.multiball ? `JACKPOT +${SUPERNOVA_JACKPOT.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];

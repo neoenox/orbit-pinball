@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Scoring, BUMPER_POINTS, DANGER_BONUS, MAX_MULTIPLIER, CHAIN_WINDOW_SECONDS } from '../src/scoring.ts';
+import { Scoring, BUMPER_POINTS, DANGER_BONUS, MAX_MULTIPLIER, CHAIN_WINDOW_SECONDS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, ORBIT_CHARGE_HITS, SUPERNOVA_JACKPOT, orbitAward } from '../src/scoring.ts';
 
 test('the multiplier grows one tier per ten bumper hits and caps at five', () => {
   const scoring = new Scoring();
@@ -111,6 +111,25 @@ test('resetChain clears the streak without touching the multiplier', () => {
   assert.equal(scoring.isChainActive(0.2), false);
   assert.deepEqual(scoring.registerHit(0.3), { streak: 1, chained: false });
   assert.equal(scoring.multiplier, 2, 'the multiplier must survive a ball save or drain');
+});
+
+test('orbit lap awards escalate on the left ramp and stay fixed on the right ramp', () => {
+  assert.deepEqual(orbitAward('left', 0, false), { side: 'left', points: 500, jackpot: false, charge: false });
+  assert.equal(orbitAward('left', 1, false).points, 1000);
+  assert.equal(orbitAward('left', 3, false).points, 2000);
+  assert.equal(orbitAward('left', 9, false).points, ORBIT_LAP_BASE * ORBIT_LAP_MAX_STEPS, 'escalation must cap at the ×4 lap');
+  assert.deepEqual(orbitAward('right', 0, false), { side: 'right', points: ORBIT_CHARGE_POINTS, jackpot: false, charge: true });
+  assert.equal(orbitAward('right', 9, false).points, ORBIT_CHARGE_POINTS, 'the right ramp never escalates');
+});
+
+test('supernova laps always pay the jackpot regardless of side or escalation', () => {
+  assert.deepEqual(orbitAward('left', 0, true), { side: 'left', points: SUPERNOVA_JACKPOT, jackpot: true, charge: false });
+  assert.deepEqual(orbitAward('right', 9, true), { side: 'right', points: SUPERNOVA_JACKPOT, jackpot: true, charge: false });
+});
+
+test('the scoring constants agree with the award rule', () => {
+  assert.equal(orbitAward('right', 0, false).points, ORBIT_CHARGE_POINTS);
+  assert.equal(ORBIT_CHARGE_HITS, 5);
 });
 
 test('reset clears both the chain and the multiplier state', () => {

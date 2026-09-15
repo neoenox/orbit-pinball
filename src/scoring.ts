@@ -16,6 +16,23 @@ export const CHAIN_WINDOW_SECONDS = 2.2;
 
 export type ChainResult = { streak: number; chained: boolean };
 
+/** Orbit ramp awards: the left ramp escalates per lap, the right pays a fixed charge. */
+export const ORBIT_LAP_BASE = 500;
+export const ORBIT_LAP_MAX_STEPS = 4;
+export const ORBIT_CHARGE_POINTS = 1000;
+/** Right-ramp laps credit this many hits toward the bumper multiplier. */
+export const ORBIT_CHARGE_HITS = 5;
+export const SUPERNOVA_JACKPOT = 5000;
+
+export type OrbitAward = { side: 'left' | 'right'; points: number; jackpot: boolean; charge: boolean };
+
+/** Pure award rule for a completed orbit lap; `laps` is the escalation counter at admission. */
+export function orbitAward(side: 'left' | 'right', laps: number, supernova: boolean): OrbitAward {
+  if (supernova) return { side, points: SUPERNOVA_JACKPOT, jackpot: true, charge: false };
+  if (side === 'left') return { side, points: ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, laps + 1), jackpot: false, charge: false };
+  return { side, points: ORBIT_CHARGE_POINTS, jackpot: false, charge: true };
+}
+
 export class Scoring {
   private hits = 0;
   private streak = 0;
