@@ -2,6 +2,10 @@
 
 TypeScript + Canvas 2D で作った、3球制のブラウザ用ピンボールです。
 
+**▶ ブラウザですぐ遊べます: <https://neoenox.github.io/orbit-pinball/>**
+
+![ORBIT Pinball のプレイ画面](docs/screenshot.png)
+
 ## 起動
 
 ```sh
