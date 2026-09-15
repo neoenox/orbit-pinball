@@ -1,4 +1,5 @@
 import type { Ball, Vec } from './physics.ts';
+import { orbitAward, type OrbitAward } from './scoring.ts';
 
 export type Side = 'left' | 'right';
 export const targets = [174, 228, 282].map(x => ({ x, y: 411, width: 28 }));
@@ -26,7 +27,7 @@ function smooth(points: Vec[]): Vec[] {
 }
 const controlPoints = (side: Side) => side === 'left' ? leftRoute : leftRoute.map(p => ({ x: 455 - p.x, y: p.y }));
 export const orbitPaths = { left: smooth(controlPoints('left')), right: smooth(controlPoints('right')) };
-type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: number; jackpot: boolean };
+type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: OrbitAward };
 
 export class OrbitCourse {
   down = [false, false, false];
@@ -45,7 +46,7 @@ export class OrbitCourse {
   onOpen: () => void = () => {};
   onClose: () => void = () => {};
   onEnter: (side: Side) => void = () => {};
-  onComplete: (points: number, side: Side, ball: Ball, jackpot: boolean) => void = () => {};
+  onComplete: (award: OrbitAward, ball: Ball) => void = () => {};
   onNormalLap: () => void = () => {};
 
   reset() {
@@ -79,7 +80,7 @@ export class OrbitCourse {
       // Use the actual crossing point so an off-centre shot never snaps to a rail.
       const path = smooth([{ x: ball.x, y: ball.y }, ...controlPoints(side).slice(1)]);
       // Left ramp grows shared points escalation; right ramp pays a fixed charge instead.
-      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: this.supernova ? 5000 : side === 'left' ? 500 * Math.min(4, this.laps + 1) : 1000, jackpot: this.supernova });
+      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: orbitAward(side, this.laps, this.supernova) });
       this.onEnter(side); return true;
     }
     return false;
@@ -108,8 +109,8 @@ export class OrbitCourse {
     this.flights.delete(ball);
     // Only the left (points) ramp grows the escalation; the right (charge) ramp leaves it alone.
     if (this.openRemaining > 0 && lap.side === 'left') this.laps++;
-    if (!lap.jackpot) this.onNormalLap();
-    this.onComplete(lap.award, lap.side, ball, lap.jackpot);
+    if (!lap.award.jackpot) this.onNormalLap();
+    this.onComplete(lap.award, ball);
     return true;
   }
 }

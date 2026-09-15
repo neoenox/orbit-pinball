@@ -69,7 +69,7 @@ test('simultaneous drains consume one life, not three', () => {
 
 test('each ball can run its own ramp and score its own jackpot', () => {
   const p = startNova(); const awards: number[] = [];
-  p.orbit.onComplete = points => awards.push(points);
+  p.orbit.onComplete = award => awards.push(award.points);
   p.balls[0].x = 82; p.balls[0].y = 376; p.balls[0].vx = 0; p.balls[0].vy = -700;
   p.balls[1].x = 373; p.balls[1].y = 376; p.balls[1].vx = 0; p.balls[1].vy = -700;
   const runners = p.balls.slice(0, 2);
@@ -93,7 +93,7 @@ test('stored locks survive a life change, but restarting clears every pending st
 
 test('a surviving ramp ball completes its admitted jackpot after supernova ends', () => {
   const p = startNova(); const awards: number[] = [];
-  p.orbit.onComplete = points => awards.push(points);
+  p.orbit.onComplete = award => awards.push(award.points);
   Object.assign(p.balls[0], { x: 82, y: 376, vx: 0, vy: -700 });
   p.step(STEP, false, false);
   const runner = p.balls[0];
