@@ -11,11 +11,22 @@ export const LAST_BALL_BONUS = 2;
 
 export type HitResult = { tierIncreased: boolean; multiplier: number };
 export type BumperResult = HitResult & { points: number };
+/** Hits this close together in simulation time continue a chain. */
+export const CHAIN_WINDOW_SECONDS = 2.2;
+
+export type ChainResult = { streak: number; chained: boolean };
 
 export class Scoring {
   private hits = 0;
+  private streak = 0;
+  private lastHitAt = -Infinity;
 
-  reset() { this.hits = 0; }
+  reset() { this.hits = 0; this.resetChain(); }
+
+  /** Clears the chain without touching the multiplier, e.g. on ball save or drain. */
+  resetChain() { this.streak = 0; this.lastHitAt = -Infinity; }
+
+  get hitStreak() { return this.streak; }
 
   get multiplier() { return this.multiplierOf(this.hits); }
 
@@ -30,6 +41,16 @@ export class Scoring {
     const multiplier = this.multiplier;
     return { tierIncreased: multiplier > before, multiplier };
   }
+
+  /** Registers a bumper hit at simulation time `at`; hits within the chain window grow the streak. */
+  registerHit(at: number): ChainResult {
+    this.streak = at - this.lastHitAt <= CHAIN_WINDOW_SECONDS ? this.streak + 1 : 1;
+    this.lastHitAt = at;
+    return { streak: this.streak, chained: this.streak >= 2 };
+  }
+
+  /** True while a chain of at least two hits is still within the display window. */
+  isChainActive(at: number) { return this.streak >= 2 && at - this.lastHitAt <= CHAIN_WINDOW_SECONDS; }
 
   /** Bumper award at the current multiplier; the hit registers afterwards, matching real pinball timing. */
   bumper(lastBall: boolean): BumperResult {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Scoring, BUMPER_POINTS, DANGER_BONUS, MAX_MULTIPLIER } from '../src/scoring.ts';
+import { Scoring, BUMPER_POINTS, DANGER_BONUS, MAX_MULTIPLIER, CHAIN_WINDOW_SECONDS } from '../src/scoring.ts';
 
 test('the multiplier grows one tier per ten bumper hits and caps at five', () => {
   const scoring = new Scoring();
@@ -71,4 +71,55 @@ test('reset returns to a fresh ×1 game with no pending tier increase', () => {
   scoring.reset();
   assert.equal(scoring.multiplier, 1);
   assert.equal(scoring.addHits(1).tierIncreased, false);
+});
+
+test('rapid hits chain while slow hits start a new chain', () => {
+  const scoring = new Scoring();
+  assert.deepEqual(scoring.registerHit(10), { streak: 1, chained: false });
+  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS), { streak: 2, chained: true }, 'a hit exactly at the window boundary still chains');
+  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS + 0.01), { streak: 3, chained: true });
+  assert.deepEqual(scoring.registerHit(15), { streak: 1, chained: false }, 'a gap past the window restarts at one');
+});
+
+test('a chain goes stale after the window passes without a hit', () => {
+  const scoring = new Scoring();
+  scoring.registerHit(0);
+  scoring.registerHit(1);
+  assert.deepEqual(scoring.registerHit(1 + CHAIN_WINDOW_SECONDS + 0.5), { streak: 1, chained: false });
+  assert.equal(scoring.hitStreak, 1);
+});
+
+test('isChainActive tracks only live chains of at least two hits', () => {
+  const scoring = new Scoring();
+  scoring.registerHit(0);
+  assert.equal(scoring.isChainActive(1), false, 'a single hit never shows the chain display');
+  scoring.registerHit(1);
+  assert.equal(scoring.isChainActive(2), true);
+  assert.equal(scoring.isChainActive(3), true);
+  assert.equal(scoring.isChainActive(1 + CHAIN_WINDOW_SECONDS), true, 'still live exactly at the window edge');
+  assert.equal(scoring.isChainActive(1 + CHAIN_WINDOW_SECONDS + 0.001), false, 'the display disappears once the window passes');
+});
+
+test('resetChain clears the streak without touching the multiplier', () => {
+  const scoring = new Scoring();
+  for (let i = 0; i < 15; i++) scoring.addHits(1);
+  assert.equal(scoring.multiplier, 2);
+  scoring.registerHit(0);
+  scoring.registerHit(0.1);
+  scoring.resetChain();
+  assert.equal(scoring.hitStreak, 0);
+  assert.equal(scoring.isChainActive(0.2), false);
+  assert.deepEqual(scoring.registerHit(0.3), { streak: 1, chained: false });
+  assert.equal(scoring.multiplier, 2, 'the multiplier must survive a ball save or drain');
+});
+
+test('reset clears both the chain and the multiplier state', () => {
+  const scoring = new Scoring();
+  scoring.addHits(20);
+  scoring.registerHit(0);
+  scoring.registerHit(0.1);
+  scoring.reset();
+  assert.equal(scoring.hitStreak, 0);
+  assert.equal(scoring.multiplier, 1);
+  assert.equal(scoring.isChainActive(5), false);
 });
