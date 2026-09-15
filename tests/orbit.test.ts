@@ -39,13 +39,17 @@ test('closed entrances bounce the ball; open entrances admit upward shots only',
     p.launched = true; p.inLane = false;
     p.ball = { x: mouth.x, y: mouth.y + 13, vx: 0, vy: -500, radius: 8 };
     for (let i = 0; i < 8; i++) p.step(STEP, false, false);
-    assert.equal(p.orbit.active, null); assert.ok(p.ball.vy > 0);
+    const stillClosed = p.orbit.active;
+    assert.equal(stillClosed, null); assert.ok(p.ball.vy > 0);
     [0, 1, 2].forEach(i => p.orbit.hitTarget(i));
     p.ball = { x: mouth.x, y: mouth.y - 1, vx: 0, vy: 200, radius: 8 };
-    p.step(STEP, false, false); assert.equal(p.orbit.active, null);
+    p.step(STEP, false, false);
+    const downwardShot = p.orbit.active;
+    assert.equal(downwardShot, null);
     p.ball = { x: mouth.x, y: mouth.y + 13, vx: 0, vy: -500, radius: 8 };
     for (let i = 0; i < 10; i++) p.step(STEP, false, false);
-    assert.equal(p.orbit.active?.side, side);
+    const active = p.orbit.active;
+    assert.ok(active !== null); assert.equal(active.side, side);
   }
 });
 
@@ -63,11 +67,30 @@ test('both ramps are continuous and return the ball to the opposite flipper', ()
       assert.ok(Math.hypot(p.ball.x - before.x, p.ball.y - before.y) < 9);
       if (p.ball.y < 120) top = true;
     }
-    assert.ok(top); assert.equal(awarded, 500); assert.equal(p.orbit.active, null);
+    assert.ok(top); assert.equal(awarded, side === 'left' ? 500 : 1000); assert.equal(p.orbit.active, null);
     assert.ok(p.ball.y >= 619 && p.ball.y <= 622);
     assert.ok(side === 'left' ? p.ball.x > 270 : p.ball.x < 185);
     assert.ok(p.ball.vy > 0);
   }
+});
+
+test('left laps escalate while right laps pay a fixed charge without growing escalation', () => {
+  const p = new Physics();
+  p.launched = true; p.inLane = false; [0, 1, 2].forEach(i => p.orbit.hitTarget(i));
+  const awards: number[] = [];
+  p.orbit.onComplete = points => awards.push(points);
+  const run = (x: number) => {
+    const n = awards.length;
+    p.ball = { x, y: entrances.left.y + 1, vx: 0, vy: -850, radius: 8 };
+    for (let i = 0; i < 1000 && awards.length === n; i++) p.step(STEP, false, false);
+  };
+  run(entrances.left.x);   // 500, laps 1
+  run(entrances.right.x);  // fixed 1000, laps stays 1
+  run(entrances.right.x);  // fixed 1000, laps stays 1
+  run(entrances.left.x);   // 1000, laps 2
+  assert.deepEqual(awards, [500, 1000, 1000, 1000]);
+  assert.equal(p.orbit.laps, 2);
+  assert.ok(p.orbit.openRemaining > 0);
 });
 
 test('an admitted lap finishes even if the gate expires midway', () => {

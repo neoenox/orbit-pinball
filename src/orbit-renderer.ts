@@ -36,7 +36,7 @@ export function drawOrbit(ctx: CanvasRenderingContext2D, course: OrbitCourse, cl
     }
     ctx.shadowBlur = 0; ctx.textAlign = 'center'; ctx.font = '700 9px "Segoe UI", sans-serif';
     ctx.fillStyle = open ? '#c9ffcf' : '#e5a5c3';
-    ctx.fillText(course.supernova ? 'JACKPOT ↑' : open ? 'SHOOT ↑' : 'LOCKED', mouth.x, mouth.y - 17);
+    ctx.fillText(course.supernova ? 'JACKPOT ↑' : open ? (side === 'left' ? 'POINTS ↑' : 'CHARGE ↑') : 'LOCKED', mouth.x, mouth.y - 17);
     ctx.fillStyle = '#b9b1df'; ctx.font = '8px "Segoe UI", sans-serif';
     ctx.fillText(side === 'left' ? 'L ORBIT' : 'R ORBIT', mouth.x, mouth.y + 21);
     if (open) {
