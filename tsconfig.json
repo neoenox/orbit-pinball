@@ -2,7 +2,8 @@
   "compilerOptions": {
     "target": "ES2022", "module": "ESNext", "lib": ["ES2022", "DOM"],
     "moduleResolution": "Bundler", "strict": true, "noEmit": true,
+    "baseUrl": ".", "paths": { "/src/*": ["./src/*"] },
     "allowImportingTsExtensions": true, "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src", "tests", "playwright.config.ts"]
 }

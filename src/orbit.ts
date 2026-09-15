@@ -37,7 +37,10 @@ export class OrbitCourse {
   get active(): Lap | null { return this.flights.values().next().value ?? null; }
   get isOpen() { return this.supernova || this.openRemaining > 0; }
   hasFlight(ball: Ball) { return this.flights.has(ball); }
-  hasFlightOn(side: Side) { return [...this.flights.values()].some(lap => lap.side === side); }
+  hasFlightOn(side: Side) {
+    for (const lap of this.flights.values()) if (lap.side === side) return true;
+    return false;
+  }
   onTarget: (index: number) => void = () => {};
   onOpen: () => void = () => {};
   onClose: () => void = () => {};
@@ -75,7 +78,8 @@ export class OrbitCourse {
       if (previous.y < mouth.y || ball.y > mouth.y || Math.abs(ball.x - mouth.x) > 24 - ball.radius) continue;
       // Use the actual crossing point so an off-centre shot never snaps to a rail.
       const path = smooth([{ x: ball.x, y: ball.y }, ...controlPoints(side).slice(1)]);
-      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: this.supernova ? 5000 : 500 * Math.min(4, this.laps + 1), jackpot: this.supernova });
+      // Left ramp grows shared points escalation; right ramp pays a fixed charge instead.
+      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: this.supernova ? 5000 : side === 'left' ? 500 * Math.min(4, this.laps + 1) : 1000, jackpot: this.supernova });
       this.onEnter(side); return true;
     }
     return false;
@@ -102,7 +106,8 @@ export class OrbitCourse {
     ball.x = end.x; ball.y = end.y;
     ball.vx = lap.side === 'left' ? -130 : 130; ball.vy = 290;
     this.flights.delete(ball);
-    if (this.openRemaining > 0) this.laps++;
+    // Only the left (points) ramp grows the escalation; the right (charge) ramp leaves it alone.
+    if (this.openRemaining > 0 && lap.side === 'left') this.laps++;
     if (!lap.jackpot) this.onNormalLap();
     this.onComplete(lap.award, lap.side, ball, lap.jackpot);
     return true;

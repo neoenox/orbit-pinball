@@ -20,6 +20,16 @@ const shooterArc = (radius: number): Rail[] => Array.from({ length: 16 }, (_, i)
     350 + Math.cos(b) * radius, 132 + Math.sin(b) * radius, 0.25);
 });
 export const shooterGate = rail(350, 40, 350, 78, 0.5, '#e8b571');
+// Scratch vectors reused by the hot collision path; step() runs 240 times per
+// second per ball, so per-call allocations add up under garbage collection.
+const scratch = { x: 0, y: 0 };
+const flipperResult: [number, number] = [0, 0];
+const flipperRailA: Rail = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 }, bounce: 0.5 };
+const flipperRailB: Rail = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 }, bounce: 0.5 };
+const flipperSurfaceA = { x: 0, y: 0 };
+const flipperSurfaceB = { x: 0, y: 0 };
+const gateRails = Object.values(entrances).map(mouth => rail(mouth.x - 24, mouth.y, mouth.x + 24, mouth.y, 0.7));
+const targetRails = targets.map(target => rail(target.x - target.width / 2, target.y, target.x + target.width / 2, target.y, 0.7));
 export const rails: Rail[] = [
   rail(28, 590, 28, 150), rail(28, 150, 50, 85), rail(50, 85, 115, 40),
   rail(115, 40, 350, 40), ...shooterArc(92), ...shooterArc(54),
@@ -33,7 +43,7 @@ export const rails: Rail[] = [
   rail(134, 105, 134, 151, 0.85, '#6ce8d2'), rail(217, 90, 217, 148, 0.85, '#6ce8d2'), rail(300, 105, 300, 151, 0.85, '#6ce8d2'),
 ];
 
-export function collideRail(ball: Ball, wall: Rail, surface: Vec = { x: 0, y: 0 }, thickness = 4): boolean {
+export function collideRail(ball: Ball, wall: Rail, surface: Vec = scratch, thickness = 4): boolean {
   const dx = wall.b.x - wall.a.x, dy = wall.b.y - wall.a.y;
   const t = Math.max(0, Math.min(1, ((ball.x - wall.a.x) * dx + (ball.y - wall.a.y) * dy) / (dx * dx + dy * dy)));
   const px = wall.a.x + t * dx, py = wall.a.y + t * dy;
@@ -63,6 +73,7 @@ const newBall = (): BallState => ({
 export class Physics {
   readonly orbit = new OrbitCourse();
   private actors: BallState[] = [newBall()];
+  /** First actor only: valid while a single ball is live. Use balls[] during multiball. */
   get ball() { return this.actors[0].ball; }
   set ball(value: Ball) { this.actors[0].ball = value; }
   get launched() { return this.actors[0].launched; }
@@ -71,8 +82,16 @@ export class Physics {
   set inLane(value: boolean) { this.actors[0].inLane = value; }
   get saveRemaining() { return this.actors[0].saveRemaining; }
   get relaunchIn() { return this.actors[0].relaunchIn; }
-  get balls() { return this.actors.filter(actor => !actor.drained).map(actor => actor.ball); }
-  get liveBallCount() { return this.actors.filter(actor => actor.launched && !actor.drained).length; }
+  get balls() {
+    const result: Ball[] = [];
+    for (const actor of this.actors) if (!actor.drained) result.push(actor.ball);
+    return result;
+  }
+  get liveBallCount() {
+    let count = 0;
+    for (const actor of this.actors) if (actor.launched && !actor.drained) count++;
+    return count;
+  }
   get busy() { return this.captureRemaining > 0 || this.replacingLockedBall; }
   lockedBalls = 0;
   blackHoleReady = false;
@@ -87,7 +106,7 @@ export class Physics {
   onHit: (index: number) => void = () => {};
   onRail: () => void = () => {};
   onDrain: () => void = () => {};
-  onFlipper: (left: boolean, speed: number) => void = () => {};
+  onFlipper: (left: boolean, speed: number, x?: number, y?: number) => void = () => {};
   onSave: () => void = () => {};
   onLaunch: () => void = () => {};
   onBlackHoleReady: () => void = () => {};
@@ -138,34 +157,43 @@ export class Physics {
   private startMultiball() {
     this.multiball = true; this.lockedBalls = 0; this.blackHoleReady = false;
     this.orbit.setSupernova(true);
-    this.actors = [-1, 0, 1].map(direction => {
-      const actor = newBall(); actor.launched = true; actor.inLane = false; actor.saveAvailable = false;
+    this.actors = [newBall(), newBall(), newBall()];
+    for (let i = 0; i < 3; i++) {
+      const direction = i - 1;
+      const actor = this.actors[i];
+      actor.launched = true; actor.inLane = false; actor.saveAvailable = false;
       actor.ball = { x: BLACK_HOLE.x + direction * 36, y: BLACK_HOLE.y - (direction === 0 ? 38 : 0), vx: direction === 0 ? 70 : direction * 320, vy: direction === 0 ? -580 : -420, radius: 8 };
-      return actor;
-    });
+    }
     this.onMultiballStart();
   }
 
-  flipper(left: boolean): Rail {
+  flipper(left: boolean, result: Rail = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 } }): Rail {
     const angle = left ? this.leftAngle : this.rightAngle;
-    const a = { x: left ? 145 : 310, y: 659 };
-    return { a, b: { x: a.x + Math.cos(angle) * 70, y: a.y + Math.sin(angle) * 70 }, bounce: 0.5 };
+    result.a.x = left ? 145 : 310; result.a.y = 659;
+    result.b.x = result.a.x + Math.cos(angle) * 70; result.b.y = result.a.y + Math.sin(angle) * 70;
+    result.bounce = 0.5;
+    return result;
+  }
+
+  private moveFlipper(angle: number, velocity: number, target: number, powered: boolean, dt: number, out: [number, number]) {
+    const distance = target - angle;
+    const maxSpeed = powered ? 18 : 7;
+    const acceleration = powered ? 300 : 110;
+    const desired = Math.sign(distance) * Math.min(maxSpeed, Math.sqrt(2 * acceleration * Math.abs(distance)));
+    velocity += Math.max(-acceleration * dt, Math.min(acceleration * dt, desired - velocity));
+    const next = angle + velocity * dt;
+    if ((target - next) * distance <= 0) { out[0] = target; out[1] = 0; } else { out[0] = next; out[1] = velocity; }
   }
 
   step(dt: number, left: boolean, right: boolean) {
-    if (this.actors.every(actor => actor.drained)) return;
+    let anyLive = false;
+    for (const actor of this.actors) if (!actor.drained) { anyLive = true; break; }
+    if (!anyLive) return;
     const oldLeft = this.leftAngle, oldRight = this.rightAngle;
-    const move = (angle: number, velocity: number, target: number, powered: boolean) => {
-      const distance = target - angle;
-      const maxSpeed = powered ? 18 : 7;
-      const acceleration = powered ? 300 : 110;
-      const desired = Math.sign(distance) * Math.min(maxSpeed, Math.sqrt(2 * acceleration * Math.abs(distance)));
-      velocity += Math.max(-acceleration * dt, Math.min(acceleration * dt, desired - velocity));
-      const next = angle + velocity * dt;
-      return (target - next) * distance <= 0 ? [target, 0] : [next, velocity];
-    };
-    [this.leftAngle, this.leftVelocity] = move(this.leftAngle, this.leftVelocity, left ? -0.5 : 0.42, left);
-    [this.rightAngle, this.rightVelocity] = move(this.rightAngle, this.rightVelocity, right ? Math.PI + 0.5 : Math.PI - 0.42, right);
+    this.moveFlipper(this.leftAngle, this.leftVelocity, left ? -0.5 : 0.42, left, dt, flipperResult);
+    this.leftAngle = flipperResult[0]; this.leftVelocity = flipperResult[1];
+    this.moveFlipper(this.rightAngle, this.rightVelocity, right ? Math.PI + 0.5 : Math.PI - 0.42, right, dt, flipperResult);
+    this.rightAngle = flipperResult[0]; this.rightVelocity = flipperResult[1];
     this.orbit.tick(dt);
     if (this.captureRemaining > 0) {
       this.captureRemaining = Math.max(0, this.captureRemaining - dt);
@@ -249,14 +277,10 @@ export class Physics {
         b.vy -= 95; this.onRail();
       }
     }
-    for (const mouth of Object.values(entrances)) {
-      if (!this.orbit.isOpen) collideRail(b, rail(mouth.x - 24, mouth.y, mouth.x + 24, mouth.y, 0.7));
+    if (!this.orbit.isOpen) for (const gate of gateRails) collideRail(b, gate);
+    for (let i = 0; i < targetRails.length; i++) {
+      if (!this.orbit.down[i] && collideRail(b, targetRails[i], undefined, 5)) this.orbit.hitTarget(i);
     }
-    targets.forEach((target, i) => {
-      if (!this.orbit.down[i] && collideRail(b, rail(target.x - target.width / 2, target.y, target.x + target.width / 2, target.y, 0.7), undefined, 5)) {
-        this.orbit.hitTarget(i);
-      }
-    });
     bumpers.forEach((bumper, i) => {
       actor.bumperCooldown[i] = Math.max(0, actor.bumperCooldown[i] - dt);
       const dx = b.x - bumper.x, dy = b.y - bumper.y, d = Math.hypot(dx, dy);
@@ -269,14 +293,18 @@ export class Physics {
         if (actor.bumperCooldown[i] === 0) { this.onHit(i); actor.bumperCooldown[i] = 0.12; }
       }
     });
-    for (const isLeft of [true, false]) {
-      const f = this.flipper(isLeft);
+    const leftFlipper = this.flipper(true, flipperRailA);
+    const rightFlipper = this.flipper(false, flipperRailB);
+    for (let i = 0; i < 2; i++) {
+      const isLeft = i === 0;
+      const f = isLeft ? leftFlipper : rightFlipper;
+      const surface = isLeft ? flipperSurfaceA : flipperSurfaceB;
       const omega = isLeft ? leftOmega : rightOmega;
       const dx = f.b.x - f.a.x, dy = f.b.y - f.a.y;
       const contact = Math.max(0, Math.min(1, ((b.x - f.a.x) * dx + (b.y - f.a.y) * dy) / (70 * 70)));
-      const surface = { x: -omega * dy * contact, y: omega * dx * contact };
+      surface.x = -omega * dy * contact; surface.y = omega * dx * contact;
       if (collideRail(b, f, surface, 9) && Math.abs(omega) > 1) {
-        this.onFlipper(isLeft, Math.hypot(surface.x, surface.y));
+        this.onFlipper(isLeft, Math.hypot(surface.x, surface.y), b.x, b.y);
       }
     }
     const speed = Math.hypot(b.vx, b.vy);

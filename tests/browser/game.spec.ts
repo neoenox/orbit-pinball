@@ -31,7 +31,7 @@ test('keyboard launch, scoring, pause, three balls, restart and saved best', asy
   for (let i = 0; i < 90; i++) {
     const status = await page.locator('#status').textContent();
     if (status === 'GAME OVER') break;
-    if (status === 'HOLD SPACE') {
+    if (status === 'HOLD SPACE' || status === 'LAST BALL') {
       await page.keyboard.down('Space'); await page.clock.runFor(800); await page.keyboard.up('Space');
     }
     await page.clock.runFor(2000);
@@ -79,8 +79,9 @@ test('ball save preserves lives and score, pauses its timers and relaunches only
   await page.keyboard.down('Space'); await page.clock.runFor(700); await page.keyboard.up('Space');
   await page.clock.runFor(400);
   await expect(page.locator('#ball-save')).toBeVisible();
+  await page.keyboard.press('p');
   const countdown = await page.locator('#ball-save').textContent();
-  await page.keyboard.press('p'); await page.clock.runFor(6000);
+  await page.clock.runFor(6000);
   await expect(page.locator('#ball-save')).toHaveText(countdown!);
   await page.keyboard.press('p');
 
@@ -104,8 +105,10 @@ test('ball save preserves lives and score, pauses its timers and relaunches only
   await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
   await expect(page.locator('#score')).toHaveText(score!);
   await expect(page.locator('#toast')).toContainText('自動で再発射');
+  // Pause before the screenshot: real frames can advance the relaunch countdown on slow runners.
+  await page.keyboard.press('p');
   await page.screenshot({ path: 'test-results/ball-save.png', fullPage: true });
-  await page.keyboard.press('p'); await page.clock.runFor(3000);
+  await page.clock.runFor(3000);
   await expect(page.locator('#ball-save')).toContainText('BALL SAVED');
   await page.keyboard.press('p'); await page.clock.runFor(800);
   await expect(page.locator('#status')).toHaveText('IN ORBIT');
@@ -149,7 +152,21 @@ test('neon hit effects, chain feedback and light mode stay responsive', async ({
   }
   await expect(page.locator('#chain')).toHaveText('✦ 3 HIT CHAIN');
   await expect(page.locator('#score')).toHaveText('000300');
+  // Screenshots pump real frames, which would advance the live ball. Pin it
+  // in safe open playfield until the capture is done for a deterministic score.
+  await page.evaluate(async () => {
+    (window as unknown as { __pinBall: boolean }).__pinBall = true;
+    const { Physics } = await import('/src/physics.ts');
+    const original = Physics.prototype.step;
+    Physics.prototype.step = function (...args: [number, boolean, boolean]) {
+      if (!(window as unknown as { __pinBall: boolean }).__pinBall) Physics.prototype.step = original;
+      else { this.inLane = false; this.ball.x = 228; this.ball.y = 550; this.ball.vx = 0; this.ball.vy = 0; }
+      return original.apply(this, args);
+    };
+  });
   await page.screenshot({ path: 'test-results/neon-hit.png', fullPage: true });
+  await expect(page.locator('#score')).toHaveText('000300');
+  await page.evaluate(() => { (window as unknown as { __pinBall: boolean }).__pinBall = false; });
   await page.keyboard.press('p');
   const frozen = await page.locator('canvas').evaluate(e => (e as HTMLCanvasElement).toDataURL());
   await page.clock.runFor(900);

@@ -5,6 +5,7 @@ import { drawOrbit, drawShields } from './orbit-renderer.ts';
 import { entrances, targets } from './orbit.ts';
 import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 import type { Ball } from './physics.ts';
+import { Scoring } from './scoring.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><div class="header-actions"><span class="edition">NEON SUPERNOVA <span class="edition-dot"></span> VOL. 001</span><button id="effects" aria-pressed="true">✦ 演出 MAX</button></div></header>
@@ -34,7 +35,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
       <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
-      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">2球保管 → 3球同時プレイ<br>超新星中は周回ごとに5,000点！</p><p>保管時は残り球を消費せず補充。<br>通常周回は500〜2,000点。<br>バンパー10ヒットで倍率アップ。</p></div>
+      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">左は得点育成 500→2,000点<br>右は固定1,000点+倍率+5チャージ<br>2球保管 → 3球同時プレイ、周回5,000点！</p><p>保管時は残り球を消費せず補充。<br>バンパー10ヒットで倍率アップ。<br>ラスト1球はバンパー2倍、ギリギリ救済はDANGER +50!</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
   </main>
@@ -42,7 +43,14 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('table');
+const cabinet = document.querySelector<HTMLElement>('.cabinet')!;
+const scoreboard = document.querySelector<HTMLElement>('.scoreboard')!;
 const ctx = canvas.getContext('2d')!;
+// Static background (backdrop, nebula, stars, engraving) is baked once per
+// canvas resize instead of being re-rendered every frame.
+const staticLayer = document.createElement('canvas');
+const staticCtx = staticLayer.getContext('2d')!;
+let staticDirty = true;
 const physics = new Physics();
 const effects = new Effects();
 const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
@@ -50,12 +58,13 @@ let reducedMotion = motionPreference.matches;
 let effectsMax = !reducedMotion;
 type State = 'ready' | 'playing' | 'paused' | 'over';
 let state: State = 'ready';
-let score = 0, best = 0, balls = 3, hits = 0;
+let score = 0, best = 0, balls = 3;
+const scoring = new Scoring();
 let left = false, right = false, charging = false, power = 0, sound = true;
 let audio: AudioContext | undefined;
 let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
 let railSoundTime = 0;
-let hitStreak = 0, lastHitTime = -Infinity;
+let hitStreak = 0, lastHitTime = -Infinity, lastDanger = -Infinity;
 let impact = 0, launchGlow = 0, celebration = 0;
 let celebrationText = '';
 const trails = new Map<Ball, { x: number; y: number }[]>();
@@ -64,6 +73,13 @@ const flipperFlashes = [0, 0];
 const popups: { x: number; y: number; text: string; life: number }[] = [];
 const stars = Array.from({ length: 55 }, (_, i) => ({ x: 36 + (i * 137.51) % 354, y: 62 + (i * 97.13) % 580, phase: i * 2.3 }));
 try { best = Math.max(0, Number(localStorage.getItem('orbit-best')) || 0); } catch { /* Storage is optional. */ }
+function applyScoring(result: { tierIncreased: boolean; multiplier: number }) {
+  if (result.tierIncreased) {
+    toast(`倍率 UP! ×${result.multiplier}`);
+    celebration = 1.7; celebrationText = `MULTIPLIER ×${result.multiplier}`;
+    if (effectsMax) { effects.burst(88, 420, '#ffce70', 1.7); effects.burst(367, 420, '#db85ff', 1.7); }
+  }
+}
 
 function tone(frequency = 440, duration = 0.12, volume = 0.055) {
   if (!sound) return;
@@ -81,10 +97,10 @@ function tone(frequency = 440, duration = 0.12, volume = 0.055) {
 function sync() {
   $('score').textContent = String(score).padStart(6, '0');
   $('best').textContent = String(best).padStart(6, '0');
-  $('multiplier').textContent = `×${Math.min(5, 1 + Math.floor(hits / 10))}`;
+  $('multiplier').textContent = balls === 1 && state !== 'ready' && state !== 'over' ? `×${scoring.multiplier} · LAST×2` : `×${scoring.multiplier}`;
   $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
   $('balls').setAttribute('aria-label', `残り${balls}球`);
-  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.multiball ? `SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.busy ? 'BALL LOCKED' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : 'HOLD SPACE';
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.multiball ? `SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.busy ? 'BALL LOCKED' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : balls === 1 ? 'LAST BALL' : 'HOLD SPACE';
   $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
   $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
   $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
@@ -92,9 +108,9 @@ function sync() {
 function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
-  state = 'playing'; score = 0; hits = 0; balls = 3; clearInput(); trails.clear(); effects.clear();
+  state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
-  hitStreak = 0; lastHitTime = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
+  hitStreak = 0; lastHitTime = -Infinity; lastDanger = -Infinity; popups.length = 0; shake = 0; flipperFlashes.fill(0);
   flashes.fill(0); physics.resetGame(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
@@ -120,24 +136,30 @@ function releaseCharge() {
 }
 
 physics.onHit = i => {
-  const points = 100 * Math.min(5, 1 + Math.floor(hits / 10));
-  score += points; hits++;
+  const lastBall = balls === 1;
+  const result = scoring.bumper(lastBall);
+  score += result.points;
+  applyScoring(result);
   hitStreak = clock - lastHitTime <= 2.2 ? hitStreak + 1 : 1; lastHitTime = clock;
   flashes[i] = 1; shake = effectsMax ? 3 : 0; impact = 1;
   const bumper = bumpers[i];
-  popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${hitStreak > 1 ? `${hitStreak} HITS · ` : ''}+${points}`, life: 0.85 });
+  popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${lastBall ? 'LAST×2 ' : ''}${hitStreak > 1 ? `${hitStreak} HITS · ` : ''}+${result.points}`, life: 0.85 });
   if (effectsMax) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(hitStreak, 5) * 0.13);
   if (hitStreak >= 2) { celebration = 1.1; celebrationText = `${hitStreak} HIT CHAIN`; }
-  if (hits % 10 === 0 && hits <= 40) {
-    toast(`倍率 UP! ×${Math.min(5, 1 + hits / 10)}`);
-    celebration = 1.7; celebrationText = `MULTIPLIER ×${1 + hits / 10}`;
-    if (effectsMax) { effects.burst(88, 420, '#ffce70', 1.7); effects.burst(367, 420, '#db85ff', 1.7); }
-  }
   saveBest(); sync(); tone(600 + i * 180 + Math.min(hitStreak - 1, 6) * 55, 0.16);
 };
-physics.onFlipper = (isLeft, speed) => {
+physics.onFlipper = (isLeft, speed, x = 0, y = 0) => {
   flipperFlashes[isLeft ? 0 : 1] = Math.min(1, speed / 650);
   tone(180 + Math.min(500, speed * 0.35), 0.08, 0.025);
+  // DANGER SAVE: a deep catch with a moving flipper earns a flat bonus (doubled on the last ball).
+  if (y > 620 && speed > 150 && clock - lastDanger > 1.5) {
+    lastDanger = clock;
+    const bonus = scoring.danger(balls === 1);
+    score += bonus;
+    popups.push({ x, y: y - 22, text: `DANGER +${bonus}`, life: 0.9 });
+    if (effectsMax) effects.burst(x, y, '#ffd27c', 0.5);
+    saveBest(); sync(); tone(980, 0.12);
+  }
 };
 physics.onLaunch = () => {
   launchGlow = 1;
@@ -176,7 +198,13 @@ physics.orbit.onEnter = side => {
   tone(780, 0.3); sync();
 };
 physics.orbit.onComplete = (points, side, ball, jackpot) => {
-  score += points; impact = 1; celebration = 1.5; celebrationText = `${jackpot ? 'JACKPOT' : 'ORBIT'} +${points.toLocaleString()}`;
+  score += points; impact = 1; celebration = 1.5;
+  if (!jackpot && side === 'right') {
+    applyScoring(scoring.addHits(5));
+    celebrationText = `CHARGE +${points.toLocaleString()} · 倍率+5`;
+  } else {
+    celebrationText = `${jackpot ? 'JACKPOT' : 'ORBIT'} +${points.toLocaleString()}`;
+  }
   if (effectsMax) effects.burst(ball.x, ball.y, jackpot ? '#ffd27c' : side === 'left' ? '#60ffe4' : '#d9a0ff', jackpot ? 1.5 : 0.6);
   tone(1200, 0.25); saveBest(); sync();
 };
@@ -205,7 +233,7 @@ physics.onDrain = () => {
     $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
     $('overlay-title').textContent = score.toLocaleString(); $('overlay-text').textContent = 'もう1回、記録を超えてみよう。';
     $('overlay-start').textContent = 'もう一度プレイ ↗';
-  } else { physics.resetBall(); toast(`あと${balls}球。SPACE 長押しで発射`); }
+  } else { physics.resetBall(); toast(balls === 1 ? 'ラスト1球! バンパー2倍で逆転を狙え。SPACE 長押しで発射' : `あと${balls}球。SPACE 長押しで発射`); }
   sync();
 };
 
@@ -270,26 +298,39 @@ function label(text: string, x: number, y: number, size: number, color: string, 
 }
 function draw() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (canvas.width !== WIDTH * dpr) { canvas.width = WIDTH * dpr; canvas.height = HEIGHT * dpr; }
+  if (canvas.width !== WIDTH * dpr) {
+    canvas.width = WIDTH * dpr; canvas.height = HEIGHT * dpr;
+    staticLayer.width = WIDTH * dpr; staticLayer.height = HEIGHT * dpr; staticDirty = true;
+  }
+  if (staticDirty) {
+    staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const backdrop = staticCtx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+    backdrop.addColorStop(0, '#0c1230'); backdrop.addColorStop(0.55, '#14102b'); backdrop.addColorStop(1, '#180b29');
+    staticCtx.fillStyle = backdrop; staticCtx.fillRect(0, 0, WIDTH, HEIGHT);
+    const nebula = staticCtx.createRadialGradient(228, 280, 25, 228, 280, 255);
+    nebula.addColorStop(0, '#672b893a'); nebula.addColorStop(0.55, '#30328322'); nebula.addColorStop(1, '#17113500');
+    staticCtx.fillStyle = nebula; staticCtx.fillRect(25, 40, 375, 535);
+    for (const star of stars) {
+      staticCtx.globalAlpha = 0.25 + (Math.sin(star.phase) + 1) * 0.16;
+      staticCtx.beginPath(); staticCtx.arc(star.x, star.y, 0.7 + star.phase % 1, 0, Math.PI * 2);
+      staticCtx.fillStyle = '#c2b4ff'; staticCtx.fill();
+    }
+    staticCtx.globalAlpha = 1;
+    staticCtx.save(); staticCtx.translate(228, 289); staticCtx.rotate(-0.5);
+    staticCtx.strokeStyle = '#805de34c'; staticCtx.lineWidth = 1;
+    for (const r of [129, 156, 179]) { staticCtx.beginPath(); staticCtx.ellipse(0, 0, r, r * 0.72, 0, 0, Math.PI * 2); staticCtx.stroke(); }
+    staticCtx.restore();
+    staticDirty = false;
+  }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const backdrop = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-  backdrop.addColorStop(0, '#0c1230'); backdrop.addColorStop(0.55, '#14102b'); backdrop.addColorStop(1, '#180b29');
-  ctx.fillStyle = backdrop; ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.drawImage(staticLayer, 0, 0, WIDTH, HEIGHT);
   ctx.save();
   if (effectsMax && !reducedMotion && shake > 0.2) ctx.translate(Math.sin(clock * 95) * shake, Math.cos(clock * 85) * shake);
-  const nebula = ctx.createRadialGradient(228, 280, 25, 228, 280, 255);
-  nebula.addColorStop(0, '#672b893a'); nebula.addColorStop(0.55, '#30328322'); nebula.addColorStop(1, '#17113500');
-  ctx.fillStyle = nebula; ctx.fillRect(25, 40, 375, 535);
-  for (const star of stars) {
-    ctx.globalAlpha = effectsMax && !reducedMotion ? 0.25 + (Math.sin(clock * 0.8 + star.phase) + 1) * 0.16 : 0.35;
+  if (effectsMax && !reducedMotion) for (const star of stars) {
+    ctx.globalAlpha = 0.25 + (Math.sin(clock * 0.8 + star.phase) + 1) * 0.16;
     circle(star.x, star.y, 0.7 + star.phase % 1, '#c2b4ff');
   }
   ctx.globalAlpha = 1;
-  // Orbital engraving: a quiet part of the table, below the physical components.
-  ctx.save(); ctx.translate(228, 289); ctx.rotate(-0.5);
-  ctx.strokeStyle = '#805de34c'; ctx.lineWidth = 1;
-  for (const r of [129, 156, 179]) { ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.72, 0, 0, Math.PI * 2); ctx.stroke(); }
-  ctx.restore();
   if (effectsMax) {
     ctx.save(); ctx.translate(228, 287); ctx.rotate(-0.5);
     for (let i = 0; i < 3; i++) {
@@ -355,7 +396,7 @@ function draw() {
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
   label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
-  label(physics.multiball ? 'JACKPOT +5,000 · GATES ALWAYS OPEN' : gateOpen ? `NEXT ORBIT +${500 * Math.min(4, physics.orbit.laps + 1)}` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
+  label(physics.multiball ? 'JACKPOT +5,000 · GATES ALWAYS OPEN' : gateOpen ? `L +${500 * Math.min(4, physics.orbit.laps + 1)} · R 1000+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];
@@ -435,8 +476,8 @@ function frame(time: number) {
   document.body.classList.toggle('supernova', physics.multiball);
   $('orbit-state').textContent = physics.multiball ? '✦ JACKPOT +5,000' : physics.orbit.active ? '● ORBIT RUN' : physics.orbit.openRemaining > 0 ? `● OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
-  document.querySelector<HTMLElement>('.cabinet')!.style.setProperty('--impact', String(effectsMax ? impact : 0));
-  document.querySelector('.scoreboard')!.classList.toggle('hit', effectsMax && impact > 0.3);
+  cabinet.style.setProperty('--impact', String(effectsMax ? impact : 0));
+  scoreboard.classList.toggle('hit', effectsMax && impact > 0.3);
   $('chain').hidden = state === 'ready' || state === 'over' || hitStreak < 2 || clock - lastHitTime > 2.2;
   $('chain').textContent = `✦ ${hitStreak} HIT CHAIN`;
   $('left').classList.toggle('pressed', left); $('right').classList.toggle('pressed', right);
