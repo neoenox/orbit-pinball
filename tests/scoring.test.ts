@@ -92,17 +92,17 @@ test('reset returns to a fresh ×1 game with no pending tier increase', () => {
 
 test('rapid hits chain while slow hits start a new chain', () => {
   const scoring = new Scoring();
-  assert.deepEqual(scoring.registerHit(10), { streak: 1, chained: false });
-  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS), { streak: 2, chained: true }, 'a hit exactly at the window boundary still chains');
-  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS + 0.01), { streak: 3, chained: true });
-  assert.deepEqual(scoring.registerHit(15), { streak: 1, chained: false }, 'a gap past the window restarts at one');
+  assert.deepEqual(scoring.registerHit(10), { streak: 1, chained: false, bonus: null });
+  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS), { streak: 2, chained: true, bonus: null }, 'a hit exactly at the window boundary still chains');
+  assert.deepEqual(scoring.registerHit(10 + CHAIN_WINDOW_SECONDS + 0.01), { streak: 3, chained: true, bonus: { hits: 3, points: 500, label: '3 COMBO' } });
+  assert.deepEqual(scoring.registerHit(15), { streak: 1, chained: false, bonus: null }, 'a gap past the window restarts at one');
 });
 
 test('a chain goes stale after the window passes without a hit', () => {
   const scoring = new Scoring();
   scoring.registerHit(0);
   scoring.registerHit(1);
-  assert.deepEqual(scoring.registerHit(1 + CHAIN_WINDOW_SECONDS + 0.5), { streak: 1, chained: false });
+  assert.deepEqual(scoring.registerHit(1 + CHAIN_WINDOW_SECONDS + 0.5), { streak: 1, chained: false, bonus: null });
   assert.equal(scoring.hitStreak, 1);
 });
 
@@ -126,7 +126,7 @@ test('resetChain clears the streak without touching the multiplier', () => {
   scoring.resetChain();
   assert.equal(scoring.hitStreak, 0);
   assert.equal(scoring.isChainActive(0.2), false);
-  assert.deepEqual(scoring.registerHit(0.3), { streak: 1, chained: false });
+  assert.deepEqual(scoring.registerHit(0.3), { streak: 1, chained: false, bonus: null });
   assert.equal(scoring.multiplier, 2, 'the multiplier must survive a ball save or drain');
 });
 
@@ -158,4 +158,40 @@ test('reset clears both the chain and the multiplier state', () => {
   assert.equal(scoring.hitStreak, 0);
   assert.equal(scoring.multiplier, 1);
   assert.equal(scoring.isChainActive(5), false);
+});
+
+test('combo thresholds pay once per chain, including after the final threshold', () => {
+  const scoring = new Scoring();
+  const awards = Array.from({ length: 25 }, (_, i) => scoring.registerHit(i * 0.1).bonus?.points ?? 0);
+  assert.deepEqual(awards.filter(Boolean), [500, 1000, 2500, 5000]);
+  assert.equal(awards.reduce<number>((a, b) => a + b, 0), 9000);
+});
+
+test('timeout and ball-save/drain reset allow a fresh combo without losing multiplier', () => {
+  const scoring = new Scoring();
+  scoring.addHits(22);
+  for (const start of [0, 10]) {
+    scoring.registerHit(start); scoring.registerHit(start + 0.1);
+    assert.equal(scoring.registerHit(start + 0.2).bonus?.points, 500);
+  }
+  scoring.resetChain();
+  assert.equal(scoring.registerHit(10.3).bonus, null);
+  scoring.registerHit(10.4);
+  assert.equal(scoring.registerHit(10.5).bonus?.points, 500);
+  assert.equal(scoring.multiplier, 3);
+});
+
+test('next multiplier distance accounts for ramp charge and the cap', () => {
+  const scoring = new Scoring();
+  assert.equal(scoring.hitsToNextMultiplier, 10);
+  scoring.addHits(8); assert.equal(scoring.hitsToNextMultiplier, 2);
+  scoring.addHits(5); assert.equal(scoring.hitsToNextMultiplier, 7);
+  scoring.addHits(40); assert.equal(scoring.hitsToNextMultiplier, 0);
+});
+
+test('jackpot grows by completed supernova laps independently of normal ramp escalation', () => {
+  for (const side of ['left', 'right'] as const) {
+    assert.deepEqual([0, 1, 2, 3, 4, 99].map(laps => orbitAward(side, 9, true, laps).points),
+      [5000, 10000, 15000, 25000, 25000, 25000]);
+  }
 });

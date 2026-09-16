@@ -1,5 +1,5 @@
 import type { Ball, Vec } from './physics.ts';
-import { orbitAward, type OrbitAward } from './scoring.ts';
+import { orbitAward, jackpotPoints, type OrbitAward } from './scoring.ts';
 
 export type Side = 'left' | 'right';
 export const targets = [174, 228, 282].map(x => ({ x, y: 411, width: 28 }));
@@ -27,7 +27,8 @@ function smooth(points: Vec[]): Vec[] {
 }
 const controlPoints = (side: Side) => side === 'left' ? leftRoute : leftRoute.map(p => ({ x: 455 - p.x, y: p.y }));
 export const orbitPaths = { left: smooth(controlPoints('left')), right: smooth(controlPoints('right')) };
-type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: OrbitAward };
+type JackpotSeries = { completed: number };
+type Lap = { side: Side; path: Vec[]; segment: number; offset: number; speed: number; award: OrbitAward; series: JackpotSeries | null };
 
 export class OrbitCourse {
   down = [false, false, false];
@@ -35,6 +36,8 @@ export class OrbitCourse {
   laps = 0;
   private flights = new Map<Ball, Lap>();
   supernova = false;
+  private jackpotSeries: JackpotSeries = { completed: 0 };
+  get nextJackpot() { return jackpotPoints(this.jackpotSeries.completed); }
   get active(): Lap | null { return this.flights.values().next().value ?? null; }
   get isOpen() { return this.supernova || this.openRemaining > 0; }
   hasFlight(ball: Ball) { return this.flights.has(ball); }
@@ -51,11 +54,13 @@ export class OrbitCourse {
 
   reset() {
     this.down.fill(false); this.openRemaining = 0; this.laps = 0; this.flights.clear(); this.supernova = false;
+    this.jackpotSeries = { completed: 0 };
   }
 
   setSupernova(enabled: boolean) {
+    if (enabled && !this.supernova) this.jackpotSeries = { completed: 0 };
     this.supernova = enabled; this.down.fill(enabled); this.openRemaining = 0; this.laps = 0;
-    // A surviving ball already on a ramp completes the lap at its admitted award.
+    // Admitted jackpot flights retain their series even after supernova ends.
   }
 
   hitTarget(index: number) {
@@ -80,7 +85,7 @@ export class OrbitCourse {
       // Use the actual crossing point so an off-centre shot never snaps to a rail.
       const path = smooth([{ x: ball.x, y: ball.y }, ...controlPoints(side).slice(1)]);
       // Left ramp grows shared points escalation; right ramp pays a fixed charge instead.
-      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: orbitAward(side, this.laps, this.supernova) });
+      this.flights.set(ball, { side, path, segment: 0, offset: 0, speed: Math.max(600, Math.min(850, Math.hypot(ball.vx, ball.vy))), award: orbitAward(side, this.laps, this.supernova), series: this.supernova ? this.jackpotSeries : null });
       this.onEnter(side); return true;
     }
     return false;
@@ -107,6 +112,8 @@ export class OrbitCourse {
     ball.x = end.x; ball.y = end.y;
     ball.vx = lap.side === 'left' ? -130 : 130; ball.vy = 290;
     this.flights.delete(ball);
+    // Advance on completion, so simultaneous flights receive consecutive rewards.
+    if (lap.series) lap.award = orbitAward(lap.side, 0, true, lap.series.completed++);
     // Only the left (points) ramp grows the escalation; the right (charge) ramp leaves it alone.
     if (this.openRemaining > 0 && lap.side === 'left') this.laps++;
     if (!lap.award.jackpot) this.onNormalLap();

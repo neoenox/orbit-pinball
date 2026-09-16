@@ -38,6 +38,9 @@ test('two real captures start supernova, parallel jackpots score, pause and life
   await place(page, [{ x: 228, y: 480, vy: -160 }]);
   await expect(page.locator('#status')).toHaveText('BALL LOCKED');
   await expect(page.locator('#nova-state')).toContainText('LOCK 1/2');
+  await expect(page.locator('#reward-title')).toHaveText('BALL LOCKED 1/2');
+  await expect(page.locator('#reward-detail')).toHaveText('ONE MORE BALL');
+  await expect(page.locator('#mission-progress')).toContainText('ONE MORE LOCK');
   await expect(page.locator('#ball-save')).toBeHidden();
   await page.clock.runFor(1400);
   await expect(page.locator('#status')).toHaveText('IN ORBIT');
@@ -48,6 +51,7 @@ test('two real captures start supernova, parallel jackpots score, pause and life
   await expect(page.locator('#status')).toHaveText('SUPERNOVA · 3 BALLS');
   await expect(page.locator('canvas')).toHaveAttribute('data-ball-count', '3');
   await expect(page.locator('#orbit-state')).toHaveText('✦ JACKPOT +5,000');
+  await expect(page.locator('#reward-title')).toHaveText('SUPERNOVA');
   await page.screenshot({ path: 'test-results/supernova.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
@@ -73,7 +77,10 @@ test('two real captures start supernova, parallel jackpots score, pause and life
     };
   });
   await page.clock.runFor(2400);
-  expect(Number(await page.locator('#score').textContent()) - before).toBe(10000);
+  expect(Number(await page.locator('#score').textContent()) - before).toBe(15000);
+  await expect(page.locator('#score-gain')).toContainText('JACKPOT +15,000');
+  await expect(page.locator('#reward-title')).toHaveText('JACKPOT');
+  await expect(page.locator('#orbit-state')).toHaveText('✦ JACKPOT +15,000');
   await expect(page.locator('#balls')).toHaveAttribute('aria-label', '残り3球');
   await place(page, [{ x: 228, y: 810, vy: 100 }, { x: 190, y: 560, vy: 0 }, { x: 270, y: 560, vy: 0 }]);
   await expect(page.locator('#status')).toHaveText('SUPERNOVA · 2 BALLS');
