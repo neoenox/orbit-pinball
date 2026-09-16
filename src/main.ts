@@ -482,5 +482,13 @@ function frame(time: number) {
   $('chain').textContent = `✦ ${scoring.hitStreak} HIT CHAIN`;
   $('left').classList.toggle('pressed', left); $('right').classList.toggle('pressed', right);
   draw(); requestAnimationFrame(frame);
+}  sync(); syncEffects(); requestAnimationFrame(frame);
+
+// Installable PWA: register the service worker in production builds only, so dev
+// servers and browser tests never get a caching layer in the way.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* Playable without offline support. */ });
+  });
 }
-sync(); syncEffects(); requestAnimationFrame(frame);
+
