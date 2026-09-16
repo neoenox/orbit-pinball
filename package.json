@@ -8,7 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "bench": "node bench/run.mjs",
+    "bench:compare": "node bench/run.mjs --compare",
+    "readme:screenshot": "node scripts/readme-screenshot.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
