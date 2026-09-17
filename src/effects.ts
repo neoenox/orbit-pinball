@@ -8,6 +8,12 @@ export class Effects {
 
   clear() { this.particles.length = 0; this.rings.length = 0; }
 
+  supernova(x: number, y: number) {
+    this.burst(x, y - 70, '#ffffff', 2);
+    this.burst(x - 75, y, '#ff75d0', 2);
+    this.burst(x + 75, y + 70, '#ffd27c', 2.5);
+  }
+
   burst(x: number, y: number, color: string, strength = 1) {
     const count = Math.round(26 + strength * 12);
     for (let i = 0; i < count; i++) {

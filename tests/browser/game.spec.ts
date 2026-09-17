@@ -152,7 +152,7 @@ test('neon hit effects, chain feedback and light mode stay responsive', async ({
     await page.clock.runFor(100);
   }
   await expect(page.locator('#chain')).toHaveText('✦ 3 HIT CHAIN');
-  await expect(page.locator('#score')).toHaveText('000300');
+  await expect(page.locator('#score')).toHaveText('000800');
   // Screenshots pump real frames, which would advance the live ball. Pin it
   // in safe open playfield until the capture is done for a deterministic score.
   await page.evaluate(async () => {
@@ -166,7 +166,7 @@ test('neon hit effects, chain feedback and light mode stay responsive', async ({
     };
   });
   await page.screenshot({ path: 'test-results/neon-hit.png', fullPage: true });
-  await expect(page.locator('#score')).toHaveText('000300');
+  await expect(page.locator('#score')).toHaveText('000800');
   await page.evaluate(() => { (window as unknown as { __pinBall: boolean }).__pinBall = false; });
   await page.keyboard.press('p');
   const frozen = await page.locator('canvas').evaluate(e => (e as HTMLCanvasElement).toDataURL());
@@ -175,7 +175,7 @@ test('neon hit effects, chain feedback and light mode stay responsive', async ({
   await page.locator('#effects').click();
   await expect(page.locator('body')).toHaveClass('light-effects');
   await expect(page.locator('#effects')).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#score')).toHaveText('000300');
+  await expect(page.locator('#score')).toHaveText('000800');
   await page.keyboard.press('p'); await page.clock.runFor(2500);
   await expect(page.locator('#chain')).toBeHidden();
   await page.locator('#effects').click();

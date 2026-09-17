@@ -139,3 +139,29 @@ test('ball rescue preserves target progress but a new ball clears it', () => {
   p.resetBall(); assert.equal(p.orbit.active, null); assert.equal(p.orbit.openRemaining, 0);
   assert.equal(p.launched, false); assert.equal(p.ball.y, 683);
 });
+
+test('jackpots grow on completion, retain their series on exit, and reset for a new supernova', () => {
+  const course = new Physics().orbit;
+  const awards: number[] = [];
+  course.onComplete = award => awards.push(award.points);
+  const enter = () => {
+    const ball = { x: 82, y: 374, vx: 0, vy: -700, radius: 8 };
+    assert.equal(course.tryEnter(ball, { x: 82, y: 376 }), true);
+    return ball;
+  };
+  course.setSupernova(true);
+  for (let i = 0; i < 4; i++) course.advance(enter(), 10);
+  assert.deepEqual(awards, [5000, 10000, 15000, 25000]);
+  const survivor = enter();
+  course.setSupernova(false);
+  course.advance(survivor, 10);
+  assert.equal(awards.at(-1), 25000, 'ending supernova must not downgrade an admitted lap');
+  course.setSupernova(true);
+  assert.equal(course.nextJackpot, 5000);
+  course.advance(enter(), 10);
+  assert.equal(awards.at(-1), 5000);
+  const cancelled = enter();
+  course.reset();
+  assert.equal(course.advance(cancelled, 10), false);
+  assert.equal(course.nextJackpot, 5000);
+});

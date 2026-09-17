@@ -76,7 +76,7 @@ test('each ball can run its own ramp and score its own jackpot', () => {
   p.step(STEP, false, false);
   runners.forEach(b => assert.equal(p.orbit.hasFlight(b), true));
   for (let i = 0; i < 1000 && awards.length < 2; i++) p.step(STEP, false, false);
-  assert.deepEqual(awards, [5000, 5000]);
+  assert.deepEqual(awards, [5000, 10000]);
   assert.equal(p.blackHoleReady, false, 'jackpots must not qualify another lock');
 });
 

@@ -5,7 +5,7 @@ import { drawOrbit, drawShields } from './orbit-renderer.ts';
 import { entrances, targets } from './orbit.ts';
 import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 import type { Ball } from './physics.ts';
-import { Scoring, ORBIT_CHARGE_HITS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, SUPERNOVA_JACKPOT, RAIL_BONUS, TARGET_POINTS } from './scoring.ts';
+import { Scoring, ORBIT_CHARGE_HITS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, RAIL_BONUS, TARGET_POINTS } from './scoring.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><div class="header-actions"><span class="edition">NEON SUPERNOVA <span class="edition-dot"></span> VOL. 001</span><button id="effects" aria-pressed="true">✦ 演出 MAX</button></div></header>
@@ -15,7 +15,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <h1>ONE MORE<br><span>ORBIT.</span></h1>
       <p class="lead">あと1球、が止まらない。</p>
       <p class="description">狙って、弾いて、もう一度。<br>小さな宇宙で、ハイスコアを目指そう。</p>
-      <div class="scoreboard"><div id="chain" class="chain-display" role="status" hidden></div><div class="score-label">YOUR SCORE <span id="multiplier">×1</span></div><div id="score" class="score">000000</div><div class="best-row"><span>♔ PERSONAL BEST</span><strong id="best">000000</strong></div></div>
+      <div class="scoreboard"><div id="chain" class="chain-display" role="status" hidden></div><div class="score-label">YOUR SCORE <span id="multiplier">×1</span></div><div id="score" class="score">000000</div><div id="score-gain" class="score-gain" hidden></div><div class="best-row"><span>♔ PERSONAL BEST</span><strong id="best">000000</strong></div></div>
       <div class="round-row"><div><span class="small-label">BALLS LEFT</span><div id="balls" class="balls" aria-label="残り3球"><i></i><i></i><i></i></div></div><div class="round-status"><span class="small-label">STATUS</span><strong id="status" role="status">READY TO ROLL</strong></div></div>
       <button id="start" class="primary">ゲームをはじめる <span>↗</span></button>
       <div class="utility"><button id="pause" disabled aria-label="一時停止">Ⅱ 一時停止</button><button id="sound" aria-pressed="true">♫ サウンド ON</button></div>
@@ -23,10 +23,12 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </section>
     <section class="machine-area" aria-label="ピンボール台">
       <div class="cabinet"><div class="cabinet-top"><span>ORBIT / 01</span><span id="orbit-state" class="live-lamp">SHIELD 0/3</span></div>
+        <div id="reward-progress" class="reward-progress" hidden><span id="multiplier-progress"></span><strong id="mission-progress"></strong></div>
         <div class="playfield"><canvas id="table" width="460" height="760" aria-label="ピンボール。左右矢印でフリッパー、スペース長押しで発射。"></canvas>
           <div id="ball-save" class="ball-save" hidden></div>
           <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
           <div id="toast" class="toast" role="status"></div>
+          <div id="reward" class="reward" role="status" hidden><strong id="reward-title"></strong><span id="reward-detail"></span></div>
         </div>
         <div class="cabinet-bottom"><span id="nova-state" role="status">LOCK 0/2 · 周回で穴を開放</span><div class="charge-track"><div id="charge"></div></div><span>✦</span></div>
       </div>
@@ -35,7 +37,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
       <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
-      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">左は得点育成 500→2,000点<br>右は固定1,000点+倍率+5チャージ<br>2球保管 → 3球同時プレイ、周回5,000点！</p><p>保管時は残り球を消費せず補充。<br>バンパー10ヒットで倍率アップ。<br>ラスト1球はバンパー2倍、ギリギリ救済はDANGER +50!</p></div>
+      <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">左は得点育成 500→2,000点<br>右は固定1,000点+倍率+5チャージ<br>2球保管 → 3球同時、周回5,000→25,000点！<br>3 / 5 / 8 / 12 HITでコンボボーナス。</p><p>保管時は残り球を消費せず補充。<br>バンパー10ヒットで倍率アップ。<br>ラスト1球はバンパー2倍、ギリギリ救済はDANGER +50!</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
   </main>
@@ -58,7 +60,7 @@ let reducedMotion = motionPreference.matches;
 let effectsMax = !reducedMotion;
 type State = 'ready' | 'playing' | 'paused' | 'over';
 let state: State = 'ready';
-let score = 0, best = 0, balls = 3;
+let score = 0, best = 0, bestAtStart = 0, balls = 3;
 const scoring = new Scoring();
 let left = false, right = false, charging = false, power = 0, sound = true;
 let audio: AudioContext | undefined;
@@ -66,6 +68,9 @@ let accumulator = 0, previous = 0, clock = 0, toastTime = 0, shake = 0;
 let railSoundTime = 0;
 let impact = 0, launchGlow = 0, celebration = 0;
 let celebrationText = '';
+let rewardTime = 0, rewardPriority = 0, scorePulse = 0, scoreGainTime = 0, scoreGain = 0, scoreGainPriority = 0;
+let novaIntro = 0, lockDim = 0;
+let pendingJackpot: { title: string; detail: string; kind: string; priority: number; duration: number } | null = null;
 const trails = new Map<Ball, { x: number; y: number }[]>();
 const flashes = [0, 0, 0];
 const flipperFlashes = [0, 0];
@@ -76,21 +81,60 @@ function applyScoring(result: { tierIncreased: boolean; multiplier: number }) {
   if (result.tierIncreased) {
     toast(`倍率 UP! ×${result.multiplier}`);
     celebration = 1.7; celebrationText = `MULTIPLIER ×${result.multiplier}`;
-    if (effectsMax) { effects.burst(88, 420, '#ffce70', 1.7); effects.burst(367, 420, '#db85ff', 1.7); }
+    showReward(`×${result.multiplier}${result.multiplier === 5 ? ' MAX!!' : ' MULTIPLIER'}`, 'バンパー得点アップ', 'multiplier', 1);
+    rewardSound('multiplier');
+    if (effectsMax && !reducedMotion) { effects.burst(88, 420, '#ffce70', 1.7); effects.burst(367, 420, '#db85ff', 1.7); }
   }
 }
 
-function tone(frequency = 440, duration = 0.12, volume = 0.055) {
+function tone(frequency = 440, duration = 0.12, volume = 0.055, delay = 0, endFrequency = frequency * 0.5) {
   if (!sound) return;
   try {
     audio ??= new AudioContext();
     void audio.resume().catch(() => {});
     const oscillator = audio.createOscillator(), gain = audio.createGain();
-    oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, audio.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.5, audio.currentTime + duration);
-    gain.gain.setValueAtTime(volume, audio.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
-    oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + duration);
+    const at = audio.currentTime + delay;
+    oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(frequency, at);
+    oscillator.frequency.exponentialRampToValueAtTime(endFrequency, at + duration);
+    gain.gain.setValueAtTime(0, audio.currentTime); gain.gain.setValueAtTime(volume, at); gain.gain.exponentialRampToValueAtTime(0.001, at + duration);
+    oscillator.connect(gain); gain.connect(audio.destination); oscillator.start(at); oscillator.stop(at + duration);
+    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
   } catch { /* Audio availability must never stop a game. */ }
+}
+
+function rewardSound(kind: 'combo' | 'multiplier' | 'lock' | 'nova' | 'jackpot', level = 1) {
+  if (kind === 'combo') [660, 830, 990].slice(0, Math.min(3, level + 1)).forEach((f, i) => tone(f, 0.2, 0.035, i * 0.065, f * 1.2));
+  if (kind === 'multiplier') { tone(160, 0.3, 0.045); tone(1040, 0.25, 0.04, 0.06, 1300); }
+  if (kind === 'lock') { tone(220, 0.5, 0.06, 0, 40); tone(110, 0.4, 0.025, 0.1, 35); }
+  if (kind === 'nova') { tone(120, 0.35, 0.045, 0, 1200); tone(70, 0.5, 0.065, 0.3); [523, 659, 784].forEach(f => tone(f, 0.55, 0.025, 0.4, f)); }
+  if (kind === 'jackpot') [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.45, 0.025, i * 0.035, f));
+}
+
+function showReward(title: string, detail: string, kind: string, priority: number, duration = 1.15) {
+  if (rewardTime > 0 && priority < rewardPriority) {
+    // A quick first lap can finish during the nova intro. Show its jackpot next.
+    if (kind === 'jackpot') pendingJackpot = { title, detail, kind, priority, duration };
+    return;
+  }
+  rewardTime = duration; rewardPriority = priority;
+  $('reward-title').textContent = title; $('reward-detail').textContent = detail;
+  $('reward').dataset.kind = kind; $('reward').hidden = false;
+}
+function clearReward() {
+  rewardTime = 0; rewardPriority = 0; novaIntro = 0; lockDim = 0;
+  pendingJackpot = null;
+  $('reward').hidden = true;
+}
+function addScore(points: number, jackpot = false) {
+  score += points;
+  const priority = jackpot ? 3 : points >= 1000 ? 2 : 1;
+  // Group rapid additions; small hits must not erase a jackpot's stronger feedback.
+  scoreGain = scoreGainTime > 0 ? scoreGain + points : points;
+  scoreGainPriority = scoreGainTime > 0 ? Math.max(scoreGainPriority, priority) : priority;
+  scoreGainTime = 0.8;
+  scorePulse = Math.max(scorePulse, jackpot ? 1 : points >= 1000 ? 0.7 : 0.3);
+  $('score-gain').textContent = `${scoreGainPriority === 3 ? 'JACKPOT ' : ''}+${scoreGain.toLocaleString()}`;
+  $('score-gain').dataset.level = String(scoreGainPriority);
 }
 
 function sync() {
@@ -107,6 +151,7 @@ function sync() {
 function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
+  bestAtStart = best; clearReward(); scorePulse = 0; scoreGainTime = 0; scoreGain = 0;
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
   popups.length = 0; shake = 0; flipperFlashes.fill(0);
@@ -137,13 +182,18 @@ function releaseCharge() {
 physics.onHit = i => {
   const lastBall = balls === 1;
   const result = scoring.bumper(lastBall);
-  score += result.points;
+  addScore(result.points);
   applyScoring(result);
-  const { streak } = scoring.registerHit(clock);
+  const { streak, bonus } = scoring.registerHit(clock);
+  if (bonus) {
+    addScore(bonus.points);
+    showReward(bonus.label, `${streak} HIT · +${bonus.points.toLocaleString()}`, 'combo', 2);
+    rewardSound('combo', streak >= 8 ? 2 : 1);
+  }
   flashes[i] = 1; shake = effectsMax ? 3 : 0; impact = 1;
   const bumper = bumpers[i];
   popups.push({ x: bumper.x, y: bumper.y - bumper.radius - 12, text: `${lastBall ? 'LAST×2 ' : ''}${streak > 1 ? `${streak} HITS · ` : ''}+${result.points}`, life: 0.85 });
-  if (effectsMax) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(streak, 5) * 0.13);
+  if (effectsMax && !reducedMotion) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(streak, 5) * 0.13);
   if (streak >= 2) { celebration = 1.1; celebrationText = `${streak} HIT CHAIN`; }
   saveBest(); sync(); tone(600 + i * 180 + Math.min(streak - 1, 6) * 55, 0.16);
 };
@@ -154,41 +204,42 @@ physics.onFlipper = (isLeft, speed, x = 0, y = 0) => {
   if (y > 620 && speed > 150) {
     const bonus = scoring.tryDanger(clock, balls === 1);
     if (bonus !== null) {
-      score += bonus;
+      addScore(bonus);
       popups.push({ x, y: y - 22, text: `DANGER +${bonus}`, life: 0.9 });
-      if (effectsMax) effects.burst(x, y, '#ffd27c', 0.5);
+      if (effectsMax && !reducedMotion) effects.burst(x, y, '#ffd27c', 0.5);
       saveBest(); sync(); tone(980, 0.12);
     }
   }
 };
 physics.onLaunch = () => {
   launchGlow = 1;
-  if (effectsMax) effects.burst(423, 683, '#af9aff', 0.55);
+  if (effectsMax && !reducedMotion) effects.burst(423, 683, '#af9aff', 0.55);
   tone(220 + Math.max(0, -physics.ball.vy - 980) / 340 * 300, 0.25);
   if (physics.saveRemaining > 0) toast('5秒間の BALL SAVE · 各球1回');
   sync();
 };
 physics.onSave = () => {
   clearInput(); trails.clear(); popups.length = 0; scoring.resetChain();
+  clearReward();
   celebration = 1.3; celebrationText = 'BALL SAVED';
-  if (effectsMax) effects.burst(228, 707, '#72ffd9', 1.2);
+  if (effectsMax && !reducedMotion) effects.burst(228, 707, '#72ffd9', 1.2);
   toast('BALL SAVED! 球数そのまま、自動で再発射'); tone(880, 0.3); sync();
 };
 physics.onRail = () => {
   if (clock - railSoundTime < 0.1) return;
-  railSoundTime = clock; score += RAIL_BONUS; saveBest(); sync(); tone(230, 0.06, 0.025);
+  railSoundTime = clock; addScore(RAIL_BONUS); saveBest(); sync(); tone(230, 0.06, 0.025);
 };
 physics.orbit.onTarget = index => {
-  score += TARGET_POINTS; impact = 1;
+  addScore(TARGET_POINTS); impact = 1;
   const target = targets[index];
   popups.push({ x: target.x, y: target.y - 14, text: '+100', life: 0.85 });
-  if (effectsMax) effects.burst(target.x, target.y, '#ffa6d5', 0.6);
+  if (effectsMax && !reducedMotion) effects.burst(target.x, target.y, '#ffa6d5', 0.6);
   tone(450 + index * 180, 0.15); saveBest(); sync();
 };
 physics.orbit.onOpen = () => {
   celebration = 1.6; celebrationText = 'GATES OPEN';
   toast('15秒間チャンス！ 左右の ↑ 入口を狙え');
-  if (effectsMax) for (const mouth of Object.values(entrances)) effects.burst(mouth.x, mouth.y, '#86ffb8', 1.2);
+  if (effectsMax && !reducedMotion) for (const mouth of Object.values(entrances)) effects.burst(mouth.x, mouth.y, '#86ffb8', 1.2);
   tone(1100, 0.35);
 };
 physics.orbit.onClose = () => { toast('ゲート閉鎖。もう一度、3枚の的を狙おう'); };
@@ -198,40 +249,51 @@ physics.orbit.onEnter = side => {
   tone(780, 0.3); sync();
 };
 physics.orbit.onComplete = (award, ball) => {
-  score += award.points; impact = 1; celebration = 1.5;
+  addScore(award.points, award.jackpot); impact = 1; celebration = 1.5;
+  if (award.jackpot) {
+    showReward('JACKPOT', `+${award.points.toLocaleString()}`, 'jackpot', 4, 1.5);
+    rewardSound('jackpot');
+    if (effectsMax && !reducedMotion) shake = 6;
+  }
   if (award.charge) {
     applyScoring(scoring.addHits(ORBIT_CHARGE_HITS));
     celebrationText = `CHARGE +${award.points.toLocaleString()} · 倍率+${ORBIT_CHARGE_HITS}`;
   } else {
     celebrationText = `${award.jackpot ? 'JACKPOT' : 'ORBIT'} +${award.points.toLocaleString()}`;
   }
-  if (effectsMax) effects.burst(ball.x, ball.y, award.jackpot ? '#ffd27c' : award.side === 'left' ? '#60ffe4' : '#d9a0ff', award.jackpot ? 1.5 : 0.6);
-  tone(1200, 0.25); saveBest(); sync();
+  if (effectsMax && !reducedMotion) effects.burst(ball.x, ball.y, award.jackpot ? '#ffd27c' : award.side === 'left' ? '#60ffe4' : '#d9a0ff', award.jackpot ? 1.5 : 0.6);
+  if (!award.jackpot) tone(1200, 0.25); saveBest(); sync();
 };
 physics.onBlackHoleReady = () => { toast('BLACK HOLE OPEN! 中央の穴へ入れて球を保管'); tone(330, 0.45); };
 physics.onLock = count => {
   clearInput(); trails.clear(); celebration = 1.3; celebrationText = `BALL LOCKED ${count}/2`;
+  showReward(`BALL LOCKED ${count}/2`, count === 1 ? 'ONE MORE BALL' : 'SUPERNOVA READY', 'lock', 3, 1.4);
+  lockDim = count === 1 ? 0.45 : 0;
   toast(count === 1 ? '1球保管！ 球数そのまま補充。もう一度周回しよう' : '2球保管！ 超新星、解放！');
-  if (effectsMax) effects.burst(BLACK_HOLE.x, BLACK_HOLE.y, '#d995ff', 1.2);
-  tone(180, 0.6); sync();
+  if (effectsMax && !reducedMotion) effects.burst(BLACK_HOLE.x, BLACK_HOLE.y, '#d995ff', 1.2);
+  rewardSound('lock'); sync();
 };
 physics.onMultiballStart = () => {
   trails.clear(); impact = 1; celebration = 2.3; celebrationText = 'SUPERNOVA';
-  toast('3球同時！ ゲート常時開放 · 周回で5,000点');
-  if (effectsMax) { effects.burst(228, 465, '#ffd27c', 2); effects.burst(228, 320, '#ff75d0', 1.5); shake = 5; }
-  tone(1500, 0.7); sync();
+  showReward('SUPERNOVA', '3 BALLS · JACKPOT 5,000 → 25,000', 'nova', 5, 2.1);
+  novaIntro = 1; lockDim = 0;
+  toast('3球同時！ ゲート常時開放 · 周回ごとにJACKPOT育成');
+  if (effectsMax && !reducedMotion) { effects.supernova(228, 390); shake = 9; }
+  rewardSound('nova'); sync();
 };
 physics.onMultiballEnd = () => { toast('超新星終了。残った1球で続行！'); sync(); };
-physics.onBallLost = remaining => { if (remaining > 1) toast(`超新星継続！ あと${remaining}球 · 周回で5,000点`); sync(); };
+physics.onBallLost = remaining => { if (remaining > 1) toast(`超新星継続！ あと${remaining}球 · 次は${physics.orbit.nextJackpot.toLocaleString()}点`); sync(); };
 function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
 }
 physics.onDrain = () => {
   balls--; clearInput(); trails.clear(); scoring.resetChain(); tone(150, 0.4);
+  clearReward();
   if (balls === 0) {
     state = 'over'; $('overlay').classList.remove('hidden');
-    $('overlay-kicker').textContent = score > 0 && score >= best ? 'PERSONAL BEST!' : 'NICE ORBIT';
-    $('overlay-title').textContent = score.toLocaleString(); $('overlay-text').textContent = 'もう1回、記録を超えてみよう。';
+    $('overlay-kicker').textContent = score > bestAtStart ? 'PERSONAL BEST!' : 'NICE ORBIT';
+    $('overlay-title').textContent = score.toLocaleString();
+    $('overlay-text').textContent = score > bestAtStart ? '自己ベスト更新！ 次はどこまでいける？' : `BESTまであと${Math.max(0, bestAtStart - score).toLocaleString()}点 · もう一度挑戦！`;
     $('overlay-start').textContent = 'もう一度プレイ ↗';
   } else { physics.resetBall(); toast(balls === 1 ? 'ラスト1球! バンパー2倍で逆転を狙え。SPACE 長押しで発射' : `あと${balls}球。SPACE 長押しで発射`); }
   sync();
@@ -242,7 +304,7 @@ $('overlay-start').addEventListener('click', () => state === 'paused' ? pause() 
 $('pause').addEventListener('click', pause);
 $('sound').addEventListener('click', () => { sound = !sound; $('sound').textContent = `♫ サウンド ${sound ? 'ON' : 'OFF'}`; $('sound').setAttribute('aria-pressed', String(sound)); if (sound) tone(); });
 function syncEffects() {
-  document.body.classList.toggle('light-effects', !effectsMax);
+  document.body.classList.toggle('light-effects', !effectsMax || reducedMotion);
   $('effects').textContent = `✦ 演出 ${effectsMax ? 'MAX' : 'LIGHT'}`;
   $('effects').setAttribute('aria-pressed', String(effectsMax));
   effects.clear(); trails.clear(); shake = 0;
@@ -331,7 +393,7 @@ function draw() {
     circle(star.x, star.y, 0.7 + star.phase % 1, '#c2b4ff');
   }
   ctx.globalAlpha = 1;
-  if (effectsMax) {
+  if (effectsMax && !reducedMotion) {
     ctx.save(); ctx.translate(228, 287); ctx.rotate(-0.5);
     for (let i = 0; i < 3; i++) {
       const angle = (reducedMotion ? 0 : clock * 0.22) + i * Math.PI * 2 / 3;
@@ -367,7 +429,7 @@ function draw() {
     circle(b.x, b.y, b.radius - 3, effectsMax && flashes[i] > 0.5 ? '#c8ffe8' : '#22324a', color, 3);
     circle(b.x, b.y, b.radius - 10, i === 2 ? '#7a285c' : '#235a66');
     label('✦', b.x, b.y + 9, 27, i === 2 ? '#ffb4ec' : '#a6ffe8');
-    if (effectsMax) {
+    if (effectsMax && !reducedMotion) {
       const angle = (reducedMotion ? 0 : clock * (i === 2 ? -0.45 : 0.35)) + i;
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.65;
       for (let j = 0; j < 3; j++) {
@@ -382,7 +444,7 @@ function draw() {
   const holeActive = physics.blackHoleReady || physics.busy || physics.multiball;
   const holeColor = physics.multiball ? '#ffd27c' : holeActive ? '#df9cff' : '#665a89';
   ctx.save(); ctx.translate(BLACK_HOLE.x, BLACK_HOLE.y);
-  if (effectsMax) { ctx.shadowColor = holeColor; ctx.shadowBlur = holeActive ? 24 : 4; }
+  if (effectsMax && !reducedMotion) { ctx.shadowColor = holeColor; ctx.shadowBlur = holeActive ? 24 : 4; }
   circle(0, 0, 23, '#060511', holeColor, 2);
   ctx.shadowBlur = 0;
   ctx.rotate(effectsMax && !reducedMotion ? clock * (holeActive ? 1.8 : 0.2) : 0);
@@ -396,7 +458,7 @@ function draw() {
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
   label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
-  label(physics.multiball ? `JACKPOT +${SUPERNOVA_JACKPOT.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
+  label(physics.multiball ? `JACKPOT +${physics.orbit.nextJackpot.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];
@@ -410,7 +472,7 @@ function draw() {
   const pull = power * 25;
   for (let i = 0; i < 7; i++) line([[414, 706 + i * 4 + pull * 0.15], [432, 708 + i * 4 + pull * 0.15]], '#799090', 1.5);
   line([[411, 699 + pull], [435, 699 + pull]], '#e8b571', 5);
-  if (effectsMax) {
+  if (effectsMax && !reducedMotion) {
     effects.draw(ctx);
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const trail of trails.values()) for (let i = 1; i < trail.length; i++) {
@@ -428,7 +490,7 @@ function draw() {
     const radius = ball.radius * (physics.captureRemaining > 0 ? Math.max(0.1, physics.captureRemaining / 0.65) : 1);
     const by = ball === physics.ball && !physics.launched ? y + pull : y;
     circle(x + 3, by + 5, radius + 1, '#07121c');
-    if (effectsMax) {
+    if (effectsMax && !reducedMotion) {
       ctx.shadowColor = physics.multiball ? '#ffd27c' : '#8dffff'; ctx.shadowBlur = 18;
       circle(x, by, radius + 1, '#4eb8dd77'); ctx.shadowBlur = 0;
       if (charging) circle(x, by, radius + 5 + power * 5, 'transparent', '#e29bff', 2);
@@ -453,7 +515,7 @@ function frame(time: number) {
     while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
     const currentBalls = physics.balls;
     for (const ball of trails.keys()) if (!currentBalls.includes(ball)) trails.delete(ball);
-    if (physics.launched && effectsMax) for (const ball of currentBalls) {
+    if (physics.launched && effectsMax && !reducedMotion) for (const ball of currentBalls) {
       const trail = trails.get(ball) ?? [];
       trail.push({ x: ball.x, y: ball.y }); if (trail.length > 18) trail.shift(); trails.set(ball, trail);
     }
@@ -461,6 +523,15 @@ function frame(time: number) {
     impact = Math.max(0, impact - dt * 3);
     launchGlow = Math.max(0, launchGlow - dt * 1.7);
     celebration = Math.max(0, celebration - dt);
+    rewardTime = Math.max(0, rewardTime - dt);
+    if (rewardTime === 0 && pendingJackpot) {
+      const next = pendingJackpot; pendingJackpot = null;
+      showReward(next.title, next.detail, next.kind, next.priority, next.duration);
+    }
+    scorePulse = Math.max(0, scorePulse - dt * 2.5);
+    scoreGainTime = Math.max(0, scoreGainTime - dt);
+    novaIntro = Math.max(0, novaIntro - dt);
+    lockDim = Math.max(0, lockDim - dt);
     for (let i = 0; i < 3; i++) flashes[i] = Math.max(0, flashes[i] - dt * 3);
     for (let i = 0; i < 2; i++) flipperFlashes[i] = Math.max(0, flipperFlashes[i] - dt * 7);
     for (let i = popups.length - 1; i >= 0; i--) { popups[i].life -= dt; if (popups[i].life <= 0) popups.splice(i, 1); }
@@ -474,8 +545,25 @@ function frame(time: number) {
   $('nova-state').textContent = physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
   canvas.dataset.ballCount = String(physics.balls.length);
   document.body.classList.toggle('supernova', physics.multiball);
-  $('orbit-state').textContent = physics.multiball ? '✦ JACKPOT +5,000' : physics.orbit.active ? '● ORBIT RUN' : physics.orbit.openRemaining > 0 ? `● OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
+  $('orbit-state').textContent = physics.multiball ? `✦ JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}` : physics.orbit.openRemaining > 0 ? `● ${physics.orbit.active ? 'ORBIT · ' : ''}OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : physics.orbit.active ? '● ORBIT RUN' : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
+  $('orbit-state').classList.toggle('urgent', !physics.multiball && physics.orbit.openRemaining > 0 && physics.orbit.openRemaining <= 5);
+  $('reward-progress').hidden = state === 'ready' || state === 'over';
+  $('multiplier-progress').textContent = scoring.hitsToNextMultiplier === 0 ? '×5 MAX!!' : `×${scoring.multiplier + 1}まであと${scoring.hitsToNextMultiplier} HIT`;
+  const targetsLeft = physics.orbit.down.filter(down => !down).length;
+  $('mission-progress').textContent = physics.multiball ? `NEXT JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}`
+    : physics.lockedBalls === 2 ? 'SUPERNOVA READY'
+    : physics.blackHoleReady ? `${physics.lockedBalls === 1 ? 'ONE MORE LOCK · ' : ''}中央の穴へ！`
+    : physics.lockedBalls === 1 ? 'ONE MORE LOCK · 周回で穴を開放'
+    : physics.orbit.isOpen ? 'GATES OPEN · ランプを狙え！'
+    : targetsLeft === 1 ? 'ONE MORE TARGET' : `GATESまであと${targetsLeft} TARGETS`;
+  const active = state === 'playing';
+  $('reward').hidden = rewardTime <= 0 || !active;
+  $('score-gain').hidden = scoreGainTime <= 0 || state === 'ready' || state === 'over';
+  scoreboard.style.setProperty('--score-pulse', String(effectsMax && !reducedMotion ? scorePulse : 0));
+  cabinet.style.setProperty('--lock-dim', String(active && effectsMax && !reducedMotion ? lockDim : 0));
+  cabinet.style.setProperty('--nova-opacity', String(active && effectsMax && !reducedMotion ? novaIntro * 0.32 : 0));
+  cabinet.style.setProperty('--nova-color', novaIntro > 0.8 ? '#ffffff' : novaIntro > 0.4 ? '#ff75d0' : '#ffd27c');
   cabinet.style.setProperty('--impact', String(effectsMax ? impact : 0));
   scoreboard.classList.toggle('hit', effectsMax && impact > 0.3);
   $('chain').hidden = state === 'ready' || state === 'over' || !scoring.isChainActive(clock);
@@ -491,4 +579,3 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* Playable without offline support. */ });
   });
 }
-

@@ -16,7 +16,13 @@ export type BumperResult = HitResult & { points: number };
 /** Hits this close together in simulation time continue a chain. */
 export const CHAIN_WINDOW_SECONDS = 2.2;
 
-export type ChainResult = { streak: number; chained: boolean };
+export const COMBO_REWARDS = [
+  { hits: 3, points: 500, label: '3 COMBO' },
+  { hits: 5, points: 1000, label: 'RUSH!' },
+  { hits: 8, points: 2500, label: 'FEVER!!' },
+  { hits: 12, points: 5000, label: 'OVERDRIVE!!!' },
+] as const;
+export type ChainResult = { streak: number; chained: boolean; bonus: typeof COMBO_REWARDS[number] | null };
 
 /** Orbit ramp awards: the left ramp escalates per lap, the right pays a fixed charge. */
 export const ORBIT_LAP_BASE = 500;
@@ -25,12 +31,16 @@ export const ORBIT_CHARGE_POINTS = 1000;
 /** Right-ramp laps credit this many hits toward the bumper multiplier. */
 export const ORBIT_CHARGE_HITS = 5;
 export const SUPERNOVA_JACKPOT = 5000;
+export const JACKPOT_STEPS = [SUPERNOVA_JACKPOT, 10000, 15000, 25000] as const;
+export function jackpotPoints(completedLaps: number) {
+  return JACKPOT_STEPS[Math.min(JACKPOT_STEPS.length - 1, Math.max(0, Math.floor(completedLaps)))];
+}
 
 export type OrbitAward = { side: 'left' | 'right'; points: number; jackpot: boolean; charge: boolean };
 
 /** Pure award rule for a completed orbit lap; `laps` is the escalation counter at admission. */
-export function orbitAward(side: 'left' | 'right', laps: number, supernova: boolean): OrbitAward {
-  if (supernova) return { side, points: SUPERNOVA_JACKPOT, jackpot: true, charge: false };
+export function orbitAward(side: 'left' | 'right', laps: number, supernova: boolean, jackpotLaps = 0): OrbitAward {
+  if (supernova) return { side, points: jackpotPoints(jackpotLaps), jackpot: true, charge: false };
   if (side === 'left') return { side, points: ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, laps + 1), jackpot: false, charge: false };
   return { side, points: ORBIT_CHARGE_POINTS, jackpot: false, charge: true };
 }
@@ -49,6 +59,9 @@ export class Scoring {
   get hitStreak() { return this.streak; }
 
   get multiplier() { return this.multiplierOf(this.hits); }
+  get hitsToNextMultiplier() {
+    return this.multiplier === MAX_MULTIPLIER ? 0 : HITS_PER_MULTIPLIER_TIER - this.hits % HITS_PER_MULTIPLIER_TIER;
+  }
 
   multiplierOf(hits: number) {
     return Math.min(MAX_MULTIPLIER, 1 + Math.floor(hits / HITS_PER_MULTIPLIER_TIER));
@@ -66,7 +79,7 @@ export class Scoring {
   registerHit(at: number): ChainResult {
     this.streak = at - this.lastHitAt <= CHAIN_WINDOW_SECONDS ? this.streak + 1 : 1;
     this.lastHitAt = at;
-    return { streak: this.streak, chained: this.streak >= 2 };
+    return { streak: this.streak, chained: this.streak >= 2, bonus: COMBO_REWARDS.find(reward => reward.hits === this.streak) ?? null };
   }
 
   /** True while a chain of at least two hits is still within the display window. */
