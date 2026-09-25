@@ -42,6 +42,14 @@ export const rails: Rail[] = [
   rail(341, 515, 341, 566, 0.8, '#ff795f'), rail(341, 566, 288, 610, 1.13, '#ff795f'), rail(288, 610, 341, 515, 1.13, '#ff795f'),
   rail(134, 105, 134, 151, 0.85, '#6ce8d2'), rail(217, 90, 217, 148, 0.85, '#6ce8d2'), rail(300, 105, 300, 151, 0.85, '#6ce8d2'),
 ];
+/** Visible/physical rails retained for the streamlined combat arena. */
+export const combatRails: Rail[] = [
+  rail(28, 590, 28, 150), rail(28, 150, 50, 85), rail(50, 85, 115, 40), rail(115, 40, 350, 40),
+  ...shooterArc(92), ...shooterArc(54), rail(442, 132, 442, 735), rail(404, 132, 402, 180, 0.25), rail(402, 180, 402, 735),
+  rail(28, 590, 105, 683), rail(105, 683, 158, 704), rail(402, 590, 351, 674), rail(351, 674, 298, 704),
+  rail(72, 460, 72, 574, 0.8, '#6ce8d2'), rail(72, 574, 128, 620, 0.8, '#6ce8d2'),
+  rail(380, 460, 380, 574, 0.8, '#6ce8d2'), rail(380, 574, 328, 620, 0.8, '#6ce8d2'),
+];
 
 export function collideRail(ball: Ball, wall: Rail, surface: Vec = scratch, thickness = 4): boolean {
   const dx = wall.b.x - wall.a.x, dy = wall.b.y - wall.a.y;
@@ -61,6 +69,9 @@ export function collideRail(ball: Ball, wall: Rail, surface: Vec = scratch, thic
 }
 
 export const BLACK_HOLE = { x: 228, y: 465, radius: 20 };
+export const combatBumpers = [
+  { x: 130, y: 420, radius: 23 }, { x: 326, y: 420, radius: 23 }, { x: 228, y: 505, radius: 27 },
+];
 type BallState = {
   ball: Ball; launched: boolean; inLane: boolean; saveRemaining: number; relaunchIn: number;
   saveAvailable: boolean; launchPower: number; bumperCooldown: number[]; drained: boolean;
@@ -104,6 +115,7 @@ export class Physics {
   private leftVelocity = 0;
   private rightVelocity = 0;
   onHit: (index: number) => void = () => {};
+  onCombatBumper: (index: number, x: number, y: number) => void = () => {};
   onRail: () => void = () => {};
   onDrain: () => void = () => {};
   onFlipper: (left: boolean, speed: number, x?: number, y?: number) => void = () => {};
@@ -114,6 +126,8 @@ export class Physics {
   onMultiballStart: () => void = () => {};
   onMultiballEnd: () => void = () => {};
   onBallLost: (remaining: number) => void = () => {};
+  /** Combat mode returns balls that pass the flippers instead of consuming a life. */
+  combatSafety = false;
 
   constructor() {
     this.orbit.onNormalLap = () => {
@@ -152,7 +166,7 @@ export class Physics {
   private launchActor(actor: BallState, power: number) {
     actor.launched = true; actor.launchPower = Math.min(1, Math.max(0, power));
     actor.ball.vy = -(980 + actor.launchPower * 340);
-    actor.saveRemaining = actor.saveAvailable ? 5 : 0;
+    actor.saveRemaining = actor.saveAvailable && !this.combatSafety ? 5 : 0;
     this.onLaunch();
   }
 
@@ -203,7 +217,7 @@ export class Physics {
     this.leftAngle = flipperResult[0]; this.leftVelocity = flipperResult[1];
     this.moveFlipper(this.rightAngle, this.rightVelocity, right ? Math.PI + 0.5 : Math.PI - 0.42, right, dt, flipperResult);
     this.rightAngle = flipperResult[0]; this.rightVelocity = flipperResult[1];
-    this.orbit.tick(dt);
+    if (!this.combatSafety) this.orbit.tick(dt);
     if (this.captureRemaining > 0) {
       this.captureRemaining = Math.max(0, this.captureRemaining - dt);
       const t = 1 - this.captureRemaining / 0.65;
@@ -270,27 +284,30 @@ export class Physics {
     actor.saveRemaining = Math.max(0, actor.saveRemaining - dt);
     if (actor.saveRemaining < 1e-9) actor.saveRemaining = 0;
     const b = actor.ball;
-    if (this.orbit.advance(b, dt)) return;
+    if (!this.combatSafety && this.orbit.advance(b, dt)) return;
     const previous = { x: b.x, y: b.y };
     b.vy += 610 * dt;
     b.vx *= Math.exp(-0.055 * dt);
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (actor.inLane && b.x < shooterGate.a.x - b.radius - 4) actor.inLane = false;
-    if (!actor.inLane && this.orbit.tryEnter(b, previous)) return;
-    if (!actor.inLane && !this.multiball && this.blackHoleReady && Math.hypot(b.x - BLACK_HOLE.x, b.y - BLACK_HOLE.y) < BLACK_HOLE.radius - 3) {
+    if (!this.combatSafety && !actor.inLane && this.orbit.tryEnter(b, previous)) return;
+    if (!this.combatSafety && !actor.inLane && !this.multiball && this.blackHoleReady && Math.hypot(b.x - BLACK_HOLE.x, b.y - BLACK_HOLE.y) < BLACK_HOLE.radius - 3) {
       this.capture(actor); return;
     }
     if (!actor.inLane) collideRail(b, shooterGate);
-    for (const wall of rails) {
+    for (const wall of this.combatSafety ? combatRails : rails) {
       if (collideRail(b, wall) && wall.bounce === 1.13) {
         b.vy -= 95; this.onRail();
       }
     }
-    if (!this.orbit.isOpen) for (const gate of gateRails) collideRail(b, gate);
-    for (let i = 0; i < targetRails.length; i++) {
-      if (!this.orbit.down[i] && collideRail(b, targetRails[i], undefined, 5)) this.orbit.hitTarget(i);
+    if (!this.combatSafety) {
+      if (!this.orbit.isOpen) for (const gate of gateRails) collideRail(b, gate);
+      for (let i = 0; i < targetRails.length; i++) {
+        if (!this.orbit.down[i] && collideRail(b, targetRails[i], undefined, 5)) this.orbit.hitTarget(i);
+      }
     }
-    bumpers.forEach((bumper, i) => {
+    const activeBumpers = this.combatSafety ? combatBumpers : bumpers;
+    activeBumpers.forEach((bumper, i) => {
       actor.bumperCooldown[i] = Math.max(0, actor.bumperCooldown[i] - dt);
       const dx = b.x - bumper.x, dy = b.y - bumper.y, d = Math.hypot(dx, dy);
       if (d < bumper.radius + b.radius) {
@@ -299,7 +316,10 @@ export class Physics {
         b.y = bumper.y + ny * (bumper.radius + b.radius + 0.5);
         const speed = Math.max(440, Math.hypot(b.vx, b.vy) * 1.02);
         b.vx = nx * speed; b.vy = ny * speed;
-        if (actor.bumperCooldown[i] === 0) { this.onHit(i); actor.bumperCooldown[i] = 0.12; }
+        if (actor.bumperCooldown[i] === 0) {
+          if (this.combatSafety) this.onCombatBumper(i, b.x, b.y); else this.onHit(i);
+          actor.bumperCooldown[i] = 0.12;
+        }
       }
     });
     const leftFlipper = this.flipper(true, flipperRailA);
@@ -321,6 +341,11 @@ export class Physics {
     if (actor.inLane && b.y > 683 && b.vy > 0) {
       // A failed shot is still the same ball, including whether its save was used.
       this.placeBall(actor); actor.saveRemaining = 0;
+    } else if (this.combatSafety && b.y > 710) {
+      // The combat arena has a catch apron below the flippers: passing the
+      // flippers costs a little combo time, never the ball or the stage.
+      this.placeBall(actor); actor.saveAvailable = false; actor.relaunchIn = 0.65;
+      actor.launchPower = 0.7; this.onSave();
     } else if (b.y > HEIGHT + 22) {
       if (actor.saveRemaining > 0 && !this.multiball) {
         this.placeBall(actor); actor.saveAvailable = false; actor.saveRemaining = 0;

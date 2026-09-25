@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { CombatStage, Enemy } from '../../src/combat.ts';
 
-test('First Contact starts the combat HUD and renders the enemy wave in the existing table', async ({ page }) => {
+test('First Contact opens the broad oblique combat arena and readable enemy wave', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -12,6 +12,11 @@ test('First Contact starts the combat HUD and renders the enemy wave in the exis
   await expect(page.locator('#combat-hp-text')).toHaveText('100 / 100');
   await expect(page.locator('#start')).toBeHidden();
   await expect(page.locator('#overlay')).toBeHidden();
+  await expect(page.locator('body')).toHaveClass(/combat-mode/);
+  const table = await page.locator('#table').boundingBox();
+  expect(table!.width).toBeGreaterThan(560);
+  expect(table!.width / table!.height).toBeGreaterThan(1.05);
+  await expect(page.locator('#nova-state')).toContainText('AUTO CATCH');
   await page.waitForTimeout(350);
   expect(errors).toEqual([]);
   await page.screenshot({ path: 'test-results/first-contact.png', fullPage: true });

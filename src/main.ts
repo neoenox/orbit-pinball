@@ -3,7 +3,7 @@ import './neon.css';
 import { Effects } from './effects.ts';
 import { drawOrbit, drawShields } from './orbit-renderer.ts';
 import { entrances, targets } from './orbit.ts';
-import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
+import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, combatRails, combatBumpers, bumpers, shooterGate } from './physics.ts';
 import type { Ball } from './physics.ts';
 import { Scoring, ORBIT_CHARGE_HITS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, RAIL_BONUS, TARGET_POINTS } from './scoring.ts';
 import { CombatStage, skillText } from './combat.ts';
@@ -57,6 +57,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('table');
+const COMBAT_VIEW_WIDTH = 720, COMBAT_VIEW_HEIGHT = 640;
 const cabinet = document.querySelector<HTMLElement>('.cabinet')!;
 const scoreboard = document.querySelector<HTMLElement>('.scoreboard')!;
 const ctx = canvas.getContext('2d')!;
@@ -180,7 +181,7 @@ function syncCombat() {
 function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
-  combatMode = false; finishShown = false; relaunchTimer = 0; document.body.classList.remove('combat-mode');
+  combatMode = false; physics.combatSafety = false; staticDirty = true; finishShown = false; relaunchTimer = 0; document.body.classList.remove('combat-mode');
   $('skill-choice').hidden = true;
   bestAtStart = best; clearReward(); scorePulse = 0; scoreGainTime = 0; scoreGain = 0;
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
@@ -190,7 +191,7 @@ function start() {
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
 }
 function startStage() {
-  combatMode = true; finishShown = false; relaunchTimer = 0; document.body.classList.add('combat-mode');
+  combatMode = true; physics.combatSafety = true; staticDirty = true; finishShown = false; relaunchTimer = 0; document.body.classList.add('combat-mode');
   bestAtStart = best; clearReward(); scorePulse = 0; scoreGainTime = 0; scoreGain = 0;
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear(); popups.length = 0;
   impact = 0; shake = 0; flipperFlashes.fill(0); flashes.fill(0);
@@ -256,6 +257,11 @@ physics.onHit = i => {
   if (effectsMax && !reducedMotion) effects.burst(bumper.x, bumper.y, i === 2 ? '#ff5cbf' : '#4cfff0', 1 + Math.min(streak, 5) * 0.13);
   if (streak >= 2) { celebration = 1.1; celebrationText = `${streak} HIT CHAIN`; }
   saveBest(); sync(); tone(600 + i * 180 + Math.min(streak - 1, 6) * 55, 0.16);
+};
+physics.onCombatBumper = (i, x, y) => {
+  flashes[i] = 1;
+  if (effectsMax && !reducedMotion) effects.burst(x, y, ['#77f4ff', '#c49aff', '#ffd57a'][i], 0.72);
+  impact = Math.max(impact, 0.16);
 };
 physics.onFlipper = (isLeft, speed, x = 0, y = 0) => {
   flipperFlashes[isLeft ? 0 : 1] = Math.min(1, speed / 650);
@@ -467,34 +473,54 @@ function drawCombat() {
   }
   for (const enemy of combat.enemies) {
     const boss = enemy.kind === 'Guardian Core';
-    const color = enemy.hitFlash > 0 ? '#ffffff' : boss ? '#ff5fbd' : enemy.kind === 'Tank' ? '#ffad63' : enemy.kind === 'Shooter' ? '#ff7185' : '#68f8ff';
-    ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = effectsMax ? boss ? 25 : 15 : 3;
+    const size = boss ? 56 : enemy.kind === 'Tank' ? 36 : enemy.kind === 'Shooter' ? 31 : 27;
+    const baseColor = boss ? '#ff5fbd' : enemy.kind === 'Tank' ? '#ffad63' : enemy.kind === 'Shooter' ? '#ff7185' : '#68f8ff';
+    const color = enemy.hitFlash > 0 ? '#ffffff' : baseColor;
+    ctx.save(); ctx.translate(enemy.x, enemy.y); ctx.shadowColor = color; ctx.shadowBlur = effectsMax ? boss ? 28 : 19 : 4;
+    ctx.globalAlpha = 0.34; ctx.beginPath(); ctx.ellipse(0, size * 0.72, size * 1.15, size * 0.42, 0, 0, Math.PI * 2); ctx.fillStyle = '#020814'; ctx.fill(); ctx.globalAlpha = 1;
+    circle(0, 0, size + 8, '#10233c88', color, 2);
     if (boss) {
-      ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y - 32); ctx.lineTo(enemy.x + 42, enemy.y - 9); ctx.lineTo(enemy.x + 34, enemy.y + 27); ctx.lineTo(enemy.x, enemy.y + 39); ctx.lineTo(enemy.x - 34, enemy.y + 27); ctx.lineTo(enemy.x - 42, enemy.y - 9); ctx.closePath();
+      ctx.beginPath(); ctx.moveTo(0, -size); ctx.lineTo(size * 1.16, -size * .35); ctx.lineTo(size, size * .48); ctx.lineTo(0, size * .83); ctx.lineTo(-size, size * .48); ctx.lineTo(-size * 1.16, -size * .35); ctx.closePath();
       ctx.fillStyle = '#301a42'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
-      circle(enemy.x, enemy.y + 2, 13, enemy.hitFlash > 0 ? '#fff' : '#bf318d', '#ffd9f2', 2); circle(enemy.x, enemy.y + 2, 5, '#fff1fb');
-      label('GUARDIAN CORE', enemy.x, enemy.y - 45, 11, '#ffe0f8', '800');
+      circle(0, 0, 23, enemy.hitFlash > 0 ? '#fff' : '#bf318d', '#ffd9f2', 3); circle(0, 0, 11, '#fff1fb');
+      for (let i = -1; i <= 1; i++) line([[i * 25, -size * .25], [i * 25, size * .44]], '#ff9de0', 3, 7);
     } else {
-      ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y - 17); ctx.lineTo(enemy.x + 18, enemy.y); ctx.lineTo(enemy.x, enemy.y + 17); ctx.lineTo(enemy.x - 18, enemy.y); ctx.closePath();
-      ctx.fillStyle = enemy.kind === 'Tank' ? '#462b23' : '#172c42'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = enemy.kind === 'Tank' ? 4 : 2; ctx.stroke();
-      circle(enemy.x, enemy.y, enemy.kind === 'Tank' ? 6 : 4, color); label(enemy.kind.toUpperCase(), enemy.x, enemy.y - 23, 8, '#d9edf1', '700');
+      if (enemy.kind === 'Drone') {
+        for (let i = 0; i < 3; i++) { ctx.save(); ctx.rotate(i * Math.PI * 2 / 3); ctx.beginPath(); ctx.moveTo(0, -size * .5); ctx.lineTo(-size * .48, -size * 1.05); ctx.lineTo(size * .48, -size * 1.05); ctx.closePath(); ctx.fillStyle = '#153a4c'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke(); ctx.restore(); }
+        circle(0, 0, size * .58, '#164253', color, 3); circle(0, 0, size * .24, '#e7ffff');
+      } else if (enemy.kind === 'Shooter') {
+        ctx.beginPath(); ctx.moveTo(-size * .72, -size * .65); ctx.lineTo(size * .45, -size * .65); ctx.lineTo(size * .78, -size * .3); ctx.lineTo(size * .78, size * .52); ctx.lineTo(-size * .45, size * .52); ctx.lineTo(-size * .78, size * .2); ctx.closePath();
+        ctx.fillStyle = '#4a1e37'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = '#ff879f'; ctx.fillRect(-6, -size * 1.1, 12, size * .53); circle(0, 2, 9, '#ffd5dc', color, 2);
+      } else {
+        ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; const x = Math.cos(a) * size, y = Math.sin(a) * size; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath();
+        ctx.fillStyle = '#493324'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.stroke();
+        circle(0, 0, size * .52, '#a45c27', '#ffd4a3', 2); ctx.fillStyle = '#ffd39a'; ctx.fillRect(-size * .62, -5, size * 1.24, 10);
+      }
     }
-    const width = boss ? 110 : 48, hpY = enemy.y + (boss ? 48 : 25);
-    ctx.fillStyle = '#07121c'; ctx.fillRect(enemy.x - width / 2, hpY, width, 5); ctx.fillStyle = color; ctx.fillRect(enemy.x - width / 2, hpY, width * enemy.hp / enemy.maxHp, 5);
+    ctx.shadowBlur = 0;
+    const title = boss ? 'GUARDIAN CORE' : enemy.kind.toUpperCase();
+    const textY = size + 18, width = boss ? 150 : enemy.kind === 'Drone' ? 91 : 105;
+    ctx.fillStyle = '#07121ceF'; ctx.fillRect(-width / 2, textY - 11, width, 31);
+    label(title, 0, textY, boss ? 12 : 11, '#f4f7ff', '800');
+    ctx.fillStyle = '#050a16'; ctx.fillRect(-width / 2, textY + 9, width, 7);
+    ctx.fillStyle = color; ctx.fillRect(-width / 2, textY + 9, width * enemy.hp / enemy.maxHp, 7);
+    label(`${enemy.hp} / ${enemy.maxHp}`, 0, textY + 28, 8, '#dbe6f4', '700');
     ctx.restore();
   }
 }
 function draw() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (canvas.width !== WIDTH * dpr) {
-    canvas.width = WIDTH * dpr; canvas.height = HEIGHT * dpr;
-    staticLayer.width = WIDTH * dpr; staticLayer.height = HEIGHT * dpr; staticDirty = true;
+  const viewWidth = combatMode ? COMBAT_VIEW_WIDTH : WIDTH, viewHeight = combatMode ? COMBAT_VIEW_HEIGHT : HEIGHT;
+  if (canvas.width !== viewWidth * dpr || canvas.height !== viewHeight * dpr) {
+    canvas.width = viewWidth * dpr; canvas.height = viewHeight * dpr;
+    staticLayer.width = viewWidth * dpr; staticLayer.height = viewHeight * dpr; staticDirty = true;
   }
   if (staticDirty) {
     staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const backdrop = staticCtx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+    const backdrop = staticCtx.createLinearGradient(0, 0, viewWidth, viewHeight);
     backdrop.addColorStop(0, '#0c1230'); backdrop.addColorStop(0.55, '#14102b'); backdrop.addColorStop(1, '#180b29');
-    staticCtx.fillStyle = backdrop; staticCtx.fillRect(0, 0, WIDTH, HEIGHT);
+    staticCtx.fillStyle = backdrop; staticCtx.fillRect(0, 0, viewWidth, viewHeight);
     const nebula = staticCtx.createRadialGradient(228, 280, 25, 228, 280, 255);
     nebula.addColorStop(0, '#672b893a'); nebula.addColorStop(0.55, '#30328322'); nebula.addColorStop(1, '#17113500');
     staticCtx.fillStyle = nebula; staticCtx.fillRect(25, 40, 375, 535);
@@ -511,15 +537,28 @@ function draw() {
     staticDirty = false;
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.drawImage(staticLayer, 0, 0, WIDTH, HEIGHT);
+  ctx.drawImage(staticLayer, 0, 0, viewWidth, viewHeight);
   ctx.save();
+  if (combatMode) {
+    // Isometric-style oblique projection: the familiar physics stay 2D, while
+    // combat gets a broad battlefield that fits beside the HUD.
+    ctx.transform(1.3, 0, 0.13, 0.8, 0, 8);
+    const board = ctx.createLinearGradient(50, 80, 400, 700);
+    board.addColorStop(0, '#132d47'); board.addColorStop(0.52, '#10192e'); board.addColorStop(1, '#211331');
+    ctx.fillStyle = board; ctx.fillRect(20, 30, 420, 710);
+    ctx.strokeStyle = '#51e8f5'; ctx.lineWidth = 3; ctx.shadowColor = '#42c9f5'; ctx.shadowBlur = effectsMax ? 22 : 2;
+    ctx.strokeRect(20, 30, 420, 710); ctx.shadowBlur = 0;
+    // A visible catch apron marks the point where an escaped ball is returned.
+    line([[78, 680], [145, 714], [228, 728], [311, 714], [382, 680]], '#48f5df', 8, effectsMax ? 18 : 2);
+    line([[78, 680], [145, 714], [228, 728], [311, 714], [382, 680]], '#eaffff', 2);
+  }
   if (effectsMax && !reducedMotion && shake > 0.2) ctx.translate(Math.sin(clock * 95) * shake, Math.cos(clock * 85) * shake);
   if (effectsMax && !reducedMotion) for (const star of stars) {
     ctx.globalAlpha = 0.25 + (Math.sin(clock * 0.8 + star.phase) + 1) * 0.16;
     circle(star.x, star.y, 0.7 + star.phase % 1, '#c2b4ff');
   }
   ctx.globalAlpha = 1;
-  if (effectsMax && !reducedMotion) {
+  if (effectsMax && !reducedMotion && !combatMode) {
     ctx.save(); ctx.translate(228, 287); ctx.rotate(-0.5);
     for (let i = 0; i < 3; i++) {
       const angle = (reducedMotion ? 0 : clock * 0.22) + i * Math.PI * 2 / 3;
@@ -527,27 +566,28 @@ function draw() {
     }
     ctx.restore();
   }
-  line([[17, 600], [17, 148], [42, 75], [107, 27], [353, 27], [418, 66], [453, 138], [453, 739]], '#3a5963', 2);
+  if (!combatMode) line([[17, 600], [17, 148], [42, 75], [107, 27], [353, 27], [418, 66], [453, 138], [453, 739]], '#3a5963', 2);
   line([[39, 463], [39, 155], [61, 99], [116, 58], [349, 58], [393, 88]], '#61fff1', 2.5, effectsMax ? 14 : 3);
   line([[40, 485], [40, 586], [109, 670], [143, 684]], '#ff65b7', 3, effectsMax ? 17 : 3);
   line([[390, 467], [390, 585], [342, 660], [316, 677]], '#bc89ff', 3, effectsMax ? 17 : 3);
-  label('O  R  B  I  T', 221, 196, 15, '#8ba4aa', '600');
-  for (let i = 0; i < 3; i++) {
+  if (!combatMode) label('O  R  B  I  T', 221, 196, 15, '#8ba4aa', '600');
+  for (let i = 0; i < 3 && !combatMode; i++) {
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 7, '#263f49', '#6ce8d2', 1.4);
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 2.5, '#6ce8d2');
   }
   if (!combatMode) drawOrbit(ctx, physics.orbit, clock, effectsMax && !reducedMotion);
-  for (const wall of rails) {
+  const visibleRails = combatMode ? combatRails : rails;
+  for (const wall of visibleRails) {
     line([[wall.a.x, wall.a.y + 3], [wall.b.x, wall.b.y + 3]], '#080f17', 11);
   }
-  for (const wall of rails) {
+  for (const wall of visibleRails) {
     line([[wall.a.x, wall.a.y], [wall.b.x, wall.b.y]], wall.color ?? '#4c6772', wall.color ? 5 : 6, wall.color ? 6 : 0);
   }
-  for (const wall of rails) {
+  for (const wall of visibleRails) {
     line([[wall.a.x, wall.a.y - 1], [wall.b.x, wall.b.y - 1]], wall.color ? '#e0eee1' : '#8ca1a4', 1);
   }
   if (!physics.inLane) line([[shooterGate.a.x, shooterGate.a.y], [shooterGate.b.x, shooterGate.b.y]], '#e8b571', 3, 4);
-  bumpers.forEach((b, i) => {
+  if (!combatMode) bumpers.forEach((b, i) => {
     const color = i === 2 ? '#ff63ba' : '#60ffed';
     circle(b.x, b.y + 7, b.radius + 7, '#08121b');
     ctx.shadowBlur = effectsMax ? 22 + flashes[i] * 30 : 5; ctx.shadowColor = color;
@@ -564,12 +604,22 @@ function draw() {
       ctx.globalAlpha = 1;
     }
   });
+  if (combatMode) combatBumpers.forEach((b, i) => {
+    const color = ['#77f4ff', '#c49aff', '#ffd57a'][i];
+    ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = effectsMax ? 20 + flashes[i] * 24 : 3;
+    circle(b.x, b.y + 5, b.radius + 5, '#08121c');
+    circle(b.x, b.y, b.radius, '#192c46', color, 3);
+    circle(b.x, b.y, b.radius * 0.61, '#26334b', '#f5f5ff', 1.5);
+    circle(b.x, b.y, b.radius * 0.25, color);
+    ctx.restore();
+  });
   if (combatMode) drawCombat();
   if (!combatMode) drawShields(ctx, physics.orbit);
   const gateOpen = physics.orbit.isOpen;
   const celebrating = celebration > 0;
   const holeActive = physics.blackHoleReady || physics.busy || physics.multiball;
   const holeColor = physics.multiball ? '#ffd27c' : holeActive ? '#df9cff' : '#665a89';
+  if (!combatMode) {
   ctx.save(); ctx.translate(BLACK_HOLE.x, BLACK_HOLE.y);
   if (effectsMax && !reducedMotion) { ctx.shadowColor = holeColor; ctx.shadowBlur = holeActive ? 24 : 4; }
   circle(0, 0, 23, '#060511', holeColor, 2);
@@ -582,8 +632,9 @@ function draw() {
   ctx.restore();
   for (let i = 0; i < 2; i++) circle(217 + i * 22, 465, 4, i < physics.lockedBalls ? '#ffe5a5' : '#27203c', '#a07ac5');
   label(physics.multiball ? `${physics.liveBallCount} BALLS · 周回で JACKPOT` : physics.blackHoleReady ? '↓ BLACK HOLE OPEN · ここを狙え ↓' : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`, 228, 439, 9, holeColor, '700');
+  }
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
-  label(combatMode ? celebrating ? celebrationText : `WAVE ${combat.wave} / 4` : celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
+  if (!combatMode) label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
   if (!combatMode) label(physics.multiball ? `JACKPOT +${physics.orbit.nextJackpot.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
@@ -594,7 +645,7 @@ function draw() {
     line([[f.a.x, f.a.y - 3], [f.b.x, f.b.y - 3]], flash > 0.25 ? '#fff7db' : '#ffc0a3', 5, flash * 18);
     circle(f.a.x, f.a.y, 5, '#773b36', '#ffb59b');
   }
-  label(physics.saveRemaining > 0 ? '✦ BALL SAVE ✦' : 'D R A I N', 228, 740, 10, physics.saveRemaining > 0 ? '#6ce8d2' : '#526d77');
+  label(combatMode ? 'A U T O   R E T U R N' : physics.saveRemaining > 0 ? '✦ BALL SAVE ✦' : 'D R A I N', 228, 740, 10, combatMode || physics.saveRemaining > 0 ? '#6ce8d2' : '#526d77');
   ctx.save(); ctx.translate(423, 422); ctx.rotate(-Math.PI / 2); label('L A U N C H   ↑', 0, 0, 10, '#8aa4a8'); ctx.restore();
   const pull = power * 25;
   for (let i = 0; i < 7; i++) line([[414, 706 + i * 4 + pull * 0.15], [432, 708 + i * 4 + pull * 0.15]], '#799090', 1.5);
@@ -683,16 +734,16 @@ function frame(time: number) {
   } else accumulator = 0;
   const saveDisplay = $('ball-save');
   saveDisplay.hidden = state === 'ready' || state === 'over' || physics.busy || physics.multiball || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
-  saveDisplay.textContent = physics.relaunchIn > 0 ? '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
+  saveDisplay.textContent = physics.relaunchIn > 0 ? combatMode ? '✦ AUTO RETURN · 再射出' : '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
   $('charge').style.width = `${power * 100}%`;
-  $('nova-state').textContent = combatMode ? `PLAYER CORE · HP ${combat.hp}/100 · BALL LOST = COMBO RESET` : physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
+  $('nova-state').textContent = combatMode ? `AUTO CATCH · BALL RETURN · COMBO RESET` : physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
   document.querySelector<HTMLElement>('.charge-track')!.hidden = combatMode;
   canvas.dataset.ballCount = String(physics.balls.length);
   document.body.classList.toggle('supernova', physics.multiball);
   $('orbit-state').textContent = combatMode ? `WAVE ${combat.wave} · ENEMIES ${combat.enemies.length}` : physics.multiball ? `✦ JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}` : physics.orbit.openRemaining > 0 ? `● ${physics.orbit.active ? 'ORBIT · ' : ''}OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : physics.orbit.active ? '● ORBIT RUN' : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
   $('orbit-state').classList.toggle('urgent', !combatMode && !physics.multiball && physics.orbit.openRemaining > 0 && physics.orbit.openRemaining <= 5);
-  $('reward-progress').hidden = state === 'ready' || state === 'over';
+  $('reward-progress').hidden = combatMode || state === 'ready' || state === 'over';
   $('multiplier-progress').textContent = scoring.hitsToNextMultiplier === 0 ? '×5 MAX!!' : `×${scoring.multiplier + 1}まであと${scoring.hitsToNextMultiplier} HIT`;
   const targetsLeft = physics.orbit.down.filter(down => !down).length;
   $('mission-progress').textContent = physics.multiball ? `NEXT JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}`

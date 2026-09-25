@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Physics, STEP, collideRail, bumpers } from '../src/physics.ts';
+import { Physics, STEP, collideRail, bumpers, combatBumpers } from '../src/physics.ts';
 
 test('a launch at either power enters the table and remains finite', () => {
   for (const power of [0, 0.5, 1]) {
@@ -154,4 +154,31 @@ test('a new ball clears a pending rescue and earns its own save on launch', () =
   for (let i = 0; i < 240; i++) p.step(STEP, false, false);
   assert.equal(p.launched, false);
   p.launch(0.2); assert.equal(p.saveRemaining, 5);
+});
+
+test('combat mode always catches balls that pass below the flippers and relaunches them', () => {
+  const p = new Physics(); let saves = 0, drains = 0;
+  p.combatSafety = true; p.onSave = () => saves++; p.onDrain = () => drains++;
+  p.launched = true; p.inLane = false;
+  p.ball = { x: 228, y: 709, vx: 0, vy: 600, radius: 8 };
+  p.step(STEP, false, false);
+  assert.equal(saves, 1); assert.equal(drains, 0);
+  assert.equal(p.inLane, true); assert.equal(p.launched, false);
+  for (let i = 0; i < 240 && !p.launched; i++) p.step(STEP, false, false);
+  assert.equal(p.launched, true);
+  p.ball = { x: 228, y: 709, vx: 0, vy: 600, radius: 8 };
+  p.step(STEP, false, false);
+  assert.equal(saves, 2, 'the catch must remain available after a previous rescue');
+  assert.equal(drains, 0);
+});
+
+test('combat bumpers visibly kick the ball without awarding classic mode score hits', () => {
+  const p = new Physics(); let bumperHits = 0, classicHits = 0;
+  p.combatSafety = true; p.onCombatBumper = () => bumperHits++; p.onHit = () => classicHits++;
+  p.launched = true; p.inLane = false;
+  const bumper = combatBumpers[0];
+  p.ball = { x: bumper.x, y: bumper.y - bumper.radius - 6, vx: 0, vy: 160, radius: 8 };
+  for (let i = 0; i < 10; i++) p.step(STEP, false, false);
+  assert.equal(bumperHits, 1); assert.equal(classicHits, 0);
+  assert.ok(p.ball.vy < 0, 'the energy bumper should return the ball to the field');
 });
