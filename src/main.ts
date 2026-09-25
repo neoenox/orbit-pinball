@@ -540,9 +540,8 @@ function draw() {
   ctx.drawImage(staticLayer, 0, 0, viewWidth, viewHeight);
   ctx.save();
   if (combatMode) {
-    // Isometric-style oblique projection: the familiar physics stay 2D, while
-    // combat gets a broad battlefield that fits beside the HUD.
-    ctx.transform(1.3, 0, 0.13, 0.8, 0, 8);
+    // Keep the combat field level and broad; classic mode retains its portrait table.
+    ctx.transform(1.3, 0, 0, 0.8, 0, 8);
     const board = ctx.createLinearGradient(50, 80, 400, 700);
     board.addColorStop(0, '#132d47'); board.addColorStop(0.52, '#10192e'); board.addColorStop(1, '#211331');
     ctx.fillStyle = board; ctx.fillRect(20, 30, 420, 710);

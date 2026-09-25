@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { CombatStage, Enemy } from '../../src/combat.ts';
 
-test('First Contact opens the broad oblique combat arena and readable enemy wave', async ({ page }) => {
+test('First Contact opens a level broad combat arena and readable enemy wave', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1280, height: 900 });
