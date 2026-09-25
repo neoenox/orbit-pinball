@@ -57,7 +57,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('table');
-const COMBAT_VIEW_WIDTH = 720, COMBAT_VIEW_HEIGHT = 640;
+const COMBAT_VIEW_WIDTH = WIDTH, COMBAT_VIEW_HEIGHT = HEIGHT;
 const cabinet = document.querySelector<HTMLElement>('.cabinet')!;
 const scoreboard = document.querySelector<HTMLElement>('.scoreboard')!;
 const ctx = canvas.getContext('2d')!;
@@ -539,18 +539,6 @@ function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.drawImage(staticLayer, 0, 0, viewWidth, viewHeight);
   ctx.save();
-  if (combatMode) {
-    // Keep the combat field level and broad; classic mode retains its portrait table.
-    ctx.transform(1.3, 0, 0, 0.8, 0, 8);
-    const board = ctx.createLinearGradient(50, 80, 400, 700);
-    board.addColorStop(0, '#132d47'); board.addColorStop(0.52, '#10192e'); board.addColorStop(1, '#211331');
-    ctx.fillStyle = board; ctx.fillRect(20, 30, 420, 710);
-    ctx.strokeStyle = '#51e8f5'; ctx.lineWidth = 3; ctx.shadowColor = '#42c9f5'; ctx.shadowBlur = effectsMax ? 22 : 2;
-    ctx.strokeRect(20, 30, 420, 710); ctx.shadowBlur = 0;
-    // A visible catch apron marks the point where an escaped ball is returned.
-    line([[78, 680], [145, 714], [228, 728], [311, 714], [382, 680]], '#48f5df', 8, effectsMax ? 18 : 2);
-    line([[78, 680], [145, 714], [228, 728], [311, 714], [382, 680]], '#eaffff', 2);
-  }
   if (effectsMax && !reducedMotion && shake > 0.2) ctx.translate(Math.sin(clock * 95) * shake, Math.cos(clock * 85) * shake);
   if (effectsMax && !reducedMotion) for (const star of stars) {
     ctx.globalAlpha = 0.25 + (Math.sin(clock * 0.8 + star.phase) + 1) * 0.16;

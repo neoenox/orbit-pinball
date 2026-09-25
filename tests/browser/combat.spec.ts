@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { CombatStage, Enemy } from '../../src/combat.ts';
 
-test('First Contact opens a level broad combat arena and readable enemy wave', async ({ page }) => {
+test('First Contact uses the restored portrait pinball board with a readable enemy wave', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -14,8 +14,8 @@ test('First Contact opens a level broad combat arena and readable enemy wave', a
   await expect(page.locator('#overlay')).toBeHidden();
   await expect(page.locator('body')).toHaveClass(/combat-mode/);
   const table = await page.locator('#table').boundingBox();
-  expect(table!.width).toBeGreaterThan(560);
-  expect(table!.width / table!.height).toBeGreaterThan(1.05);
+  expect(table!.width).toBeGreaterThan(350);
+  expect(table!.width / table!.height).toBeLessThan(0.75);
   await expect(page.locator('#nova-state')).toContainText('AUTO CATCH');
   await page.waitForTimeout(350);
   expect(errors).toEqual([]);
