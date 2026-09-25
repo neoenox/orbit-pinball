@@ -6,6 +6,7 @@ import { entrances, targets } from './orbit.ts';
 import { Physics, BLACK_HOLE, WIDTH, HEIGHT, STEP, rails, bumpers, shooterGate } from './physics.ts';
 import type { Ball } from './physics.ts';
 import { Scoring, ORBIT_CHARGE_HITS, ORBIT_LAP_BASE, ORBIT_LAP_MAX_STEPS, ORBIT_CHARGE_POINTS, RAIL_BONUS, TARGET_POINTS } from './scoring.ts';
+import { CombatStage, skillText } from './combat.ts';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="topbar"><a class="brand" href="./" aria-label="ORBIT ホーム"><span class="brand-mark">◉</span> ORBIT<span class="brand-sub">ARCADE CLUB</span></a><div class="header-actions"><span class="edition">NEON SUPERNOVA <span class="edition-dot"></span> VOL. 001</span><button id="effects" aria-pressed="true">✦ 演出 MAX</button></div></header>
@@ -13,10 +14,17 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <section class="intro">
       <div class="eyebrow"><span></span> LIGHT UP THE UNIVERSE</div>
       <h1>ONE MORE<br><span>ORBIT.</span></h1>
-      <p class="lead">あと1球、が止まらない。</p>
-      <p class="description">狙って、弾いて、もう一度。<br>小さな宇宙で、ハイスコアを目指そう。</p>
+      <p class="lead">FIRST CONTACT</p>
+      <p class="description">敵を撃破してウェーブを突破。<br>コアHPを守り、Guardian Coreを倒そう。</p>
+      <section id="combat-hud" class="combat-hud" aria-label="ステージ状況" hidden>
+        <div class="combat-hud-heading"><span id="combat-wave">WAVE 1 / 4</span><strong id="combat-combo">COMBO ×0</strong></div>
+        <div class="hp-caption"><span>PLAYER CORE</span><span id="combat-hp-text">100 / 100</span></div>
+        <div class="hp-track"><div id="combat-hp"></div></div>
+        <div id="combat-skills" class="combat-skills">取得スキルなし</div>
+      </section>
       <div class="scoreboard"><div id="chain" class="chain-display" role="status" hidden></div><div class="score-label">YOUR SCORE <span id="multiplier">×1</span></div><div id="score" class="score">000000</div><div id="score-gain" class="score-gain" hidden></div><div class="best-row"><span>♔ PERSONAL BEST</span><strong id="best">000000</strong></div></div>
       <div class="round-row"><div><span class="small-label">BALLS LEFT</span><div id="balls" class="balls" aria-label="残り3球"><i></i><i></i><i></i></div></div><div class="round-status"><span class="small-label">STATUS</span><strong id="status" role="status">READY TO ROLL</strong></div></div>
+      <button id="stage-start" class="primary stage-start">FIRST CONTACT を開始 <span>↗</span></button>
       <button id="start" class="primary">ゲームをはじめる <span>↗</span></button>
       <div class="utility"><button id="pause" disabled aria-label="一時停止">Ⅱ 一時停止</button><button id="sound" aria-pressed="true">♫ サウンド ON</button></div>
       <p class="local-note">ハイスコアはこのブラウザに保存されます</p>
@@ -29,6 +37,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <div id="overlay" class="overlay"><span id="overlay-kicker">WELCOME TO THE CLUB</span><h2 id="overlay-title">準備はいい？</h2><p id="overlay-text">3つのボールで、どこまでいける？</p><button id="overlay-start">PLAY NOW <span>↗</span></button></div>
           <div id="toast" class="toast" role="status"></div>
           <div id="reward" class="reward" role="status" hidden><strong id="reward-title"></strong><span id="reward-detail"></span></div>
+          <section id="skill-choice" class="skill-choice" aria-labelledby="skill-choice-title" hidden>
+            <span class="skill-kicker">WAVE CLEAR</span><h2 id="skill-choice-title">スキルを選択</h2>
+            <p>次のウェーブに1つ持ち込める</p><div id="skill-options" class="skill-options"></div>
+          </section>
         </div>
         <div class="cabinet-bottom"><span id="nova-state" role="status">LOCK 0/2 · 周回で穴を開放</span><div class="charge-track"><div id="charge"></div></div><span>✦</span></div>
       </div>
@@ -36,7 +48,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </section>
     <aside class="guide"><div class="guide-heading"><span>HOW TO PLAY</span><span>↙</span></div>
       <div class="instruction"><div class="key-pair"><kbd>←</kbd><kbd>→</kbd></div><h3>ボールを打ち返す</h3><p>左右のフリッパーを操作。<br>A / D キーでも遊べます。</p></div>
-      <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p></div>
+      <div class="instruction"><kbd class="wide-key">SPACE <span>⎵</span></kbd><h3>長押しして、発射</h3><p>ためて、離す。<br>長押しするほど強く飛びます。</p><p class="save-tip">発射後5秒以内の落球を救済。<br>各球1回、自動で再発射します。</p><p class="combat-tip">落球時は0.8秒後に再射出。<br>コアHPが0になるとゲームオーバー。</p></div>
       <div class="mission"><span class="mission-orbit">✳</span><span class="small-label">IGNITE THE SUPERNOVA</span><h3>2球ためて、超新星！</h3><p>的を3枚倒す → 15秒間ランプ開放。<br>周回すると中央の穴が開く。<br>穴に入れて保管、もう一度周回！</p><p class="orbit-reward">左は得点育成 500→2,000点<br>右は固定1,000点+倍率+5チャージ<br>2球保管 → 3球同時、周回5,000→25,000点！<br>3 / 5 / 8 / 12 HITでコンボボーナス。</p><p>保管時は残り球を消費せず補充。<br>バンパー10ヒットで倍率アップ。<br>ラスト1球はバンパー2倍、ギリギリ救済はDANGER +50!</p></div>
       <div class="pause-hint"><kbd>P</kbd><span>ひと息つく / 再開</span></div>
     </aside>
@@ -54,12 +66,16 @@ const staticLayer = document.createElement('canvas');
 const staticCtx = staticLayer.getContext('2d')!;
 let staticDirty = true;
 const physics = new Physics();
+const combat = new CombatStage();
 const effects = new Effects();
 const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
 let reducedMotion = motionPreference.matches;
 let effectsMax = !reducedMotion;
 type State = 'ready' | 'playing' | 'paused' | 'over';
 let state: State = 'ready';
+let combatMode = false;
+let relaunchTimer = 0;
+let finishShown = false;
 let score = 0, best = 0, bestAtStart = 0, balls = 3;
 const scoring = new Scoring();
 let left = false, right = false, charging = false, power = 0, sound = true;
@@ -143,20 +159,64 @@ function sync() {
   $('multiplier').textContent = balls === 1 && state !== 'ready' && state !== 'over' ? `×${scoring.multiplier} · LAST×2` : `×${scoring.multiplier}`;
   $('balls').innerHTML = [0, 1, 2].map(i => `<i class="${i < balls ? '' : 'spent'}"></i>`).join('');
   $('balls').setAttribute('aria-label', `残り${balls}球`);
-  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : physics.multiball ? `SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.busy ? 'BALL LOCKED' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : balls === 1 ? 'LAST BALL' : 'HOLD SPACE';
+  $('status').textContent = state === 'ready' ? 'READY TO ROLL' : state === 'paused' ? 'TAKE A BREATHER' : state === 'over' ? 'GAME OVER' : combatMode ? `WAVE ${combat.wave} · CORE ${combat.hp}%` : physics.multiball ? `SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.busy ? 'BALL LOCKED' : physics.relaunchIn > 0 ? 'BALL SAVED' : physics.orbit.active ? 'ORBIT RUN' : physics.launched ? 'IN ORBIT' : balls === 1 ? 'LAST BALL' : 'HOLD SPACE';
   $('pause').textContent = state === 'paused' ? '▷ 再開' : 'Ⅱ 一時停止';
   $<HTMLButtonElement>('pause').disabled = state === 'ready' || state === 'over';
   $('start').innerHTML = `${state === 'ready' ? 'ゲームをはじめる' : 'もう一度はじめる'} <span>↗</span>`;
+  $('stage-start').innerHTML = `${state === 'ready' ? 'FIRST CONTACT を開始' : 'STAGE 1 を再挑戦'} <span>↗</span>`;
+  $('stage-start').classList.toggle('hidden', combatMode && state !== 'ready' && state !== 'over');
+  syncCombat();
+}
+function syncCombat() {
+  const hud = $('combat-hud'); hud.hidden = !combatMode;
+  $('combat-wave').textContent = `WAVE ${Math.min(combat.wave, 4)} / 4${combat.wave === 4 ? ' · BOSS' : ''}`;
+  $('combat-combo').textContent = `COMBO ×${combat.combo}`;
+  $('combat-hp-text').textContent = `${combat.hp} / 100`;
+  $('combat-hp').style.width = `${combat.hp}%`;
+  $('combat-hp').classList.toggle('critical', combat.hp <= 30);
+  $('combat-skills').textContent = combat.skillSummary.length ? combat.skillSummary.join('　·　') : '取得スキルなし';
+  $('combat-hud').classList.toggle('damaged', combat.lastDamage > 0);
 }
 function toast(message: string) { $('toast').textContent = message; $('toast').classList.add('visible'); toastTime = 2.4; }
 function clearInput() { left = false; right = false; charging = false; power = 0; }
 function start() {
+  combatMode = false; finishShown = false; relaunchTimer = 0; document.body.classList.remove('combat-mode');
+  $('skill-choice').hidden = true;
   bestAtStart = best; clearReward(); scorePulse = 0; scoreGainTime = 0; scoreGain = 0;
   state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear();
   impact = 0; launchGlow = 0; celebration = 0;
   popups.length = 0; shake = 0; flipperFlashes.fill(0);
   flashes.fill(0); physics.resetGame(); $('overlay').classList.add('hidden'); sync();
   toast('SPACE 長押し → 離して発射'); tone(660, 0.22);
+}
+function startStage() {
+  combatMode = true; finishShown = false; relaunchTimer = 0; document.body.classList.add('combat-mode');
+  bestAtStart = best; clearReward(); scorePulse = 0; scoreGainTime = 0; scoreGain = 0;
+  state = 'playing'; score = 0; scoring.reset(); balls = 3; clearInput(); trails.clear(); effects.clear(); popups.length = 0;
+  impact = 0; shake = 0; flipperFlashes.fill(0); flashes.fill(0);
+  combat.start(); physics.resetGame(); physics.launch(0.72);
+  $('overlay').classList.add('hidden'); $('skill-choice').hidden = true; sync();
+  toast('ボールを敵に当て、コアHPを守ろう'); tone(660, 0.22);
+}
+function presentSkillChoice() {
+  const root = $('skill-options'); root.replaceChildren();
+  for (const skill of combat.choices) {
+    const button = document.createElement('button'); button.className = 'skill-card'; button.dataset.skill = skill;
+    const title = document.createElement('strong'); title.textContent = `${skill}${combat.skills[skill] ? ` · Lv${combat.skills[skill] + 1}` : ' · Lv1'}`;
+    const detail = document.createElement('span'); detail.textContent = skillText[skill];
+    button.append(title, detail);
+    button.addEventListener('click', () => {
+      if (!combat.choose(skill)) return;
+      $('skill-choice').hidden = true; $('stage-start').classList.add('hidden');
+      if (skill === 'MULTIBALL') physics.addCombatBall();
+      celebration = 1.5; celebrationText = `${skill} LV${combat.skills[skill]} ACQUIRED`;
+      if (effectsMax && !reducedMotion) { effects.supernova(228, 390); shake = 5; }
+      toast(`${skill} を獲得 · ${skillText[skill]}`); tone(900, 0.35); sync();
+    });
+    root.append(button);
+  }
+  $('skill-choice').hidden = false; clearInput();
+  if (combat.wave === 4) { celebration = 2.2; celebrationText = 'GUARDIAN CORE INBOUND'; effects.supernova(228, 190); shake = 7; }
 }
 function pause() {
   if (state !== 'playing' && state !== 'paused') return;
@@ -219,6 +279,7 @@ physics.onLaunch = () => {
   sync();
 };
 physics.onSave = () => {
+  if (combatMode) { combat.combo = 0; combat.onCombo(0); toast('BALL RECOVERED · コンボリセット'); sync(); return; }
   clearInput(); trails.clear(); popups.length = 0; scoring.resetChain();
   clearReward();
   celebration = 1.3; celebrationText = 'BALL SAVED';
@@ -282,11 +343,50 @@ physics.onMultiballStart = () => {
   rewardSound('nova'); sync();
 };
 physics.onMultiballEnd = () => { toast('超新星終了。残った1球で続行！'); sync(); };
-physics.onBallLost = remaining => { if (remaining > 1) toast(`超新星継続！ あと${remaining}球 · 次は${physics.orbit.nextJackpot.toLocaleString()}点`); sync(); };
+physics.onBallLost = remaining => {
+  if (combatMode) { combat.combo = 0; combat.onCombo(0); toast(`BALL LOST · COMBO RESET · 残り${remaining}球`); sync(); return; }
+  if (remaining > 1) toast(`超新星継続！ あと${remaining}球 · 次は${physics.orbit.nextJackpot.toLocaleString()}点`); sync();
+};
+combat.onHit = (enemy, damage, killed) => {
+  const text = killed ? `BREAK · ${enemy.kind.toUpperCase()}` : `-${damage}`;
+  popups.push({ x: enemy.x, y: enemy.y - 25, text, life: 1.05 });
+  impact = 1; shake = effectsMax ? (killed ? 5 : 2.2) : 0;
+  if (effectsMax && !reducedMotion) effects.burst(enemy.x, enemy.y, killed ? '#ffd27c' : '#5ffff0', killed ? 1.5 : 0.72);
+  addScore(killed ? 500 : damage * 10); tone(killed ? 1050 : 720, killed ? 0.25 : 0.1);
+  if (killed && enemy.kind === 'Guardian Core') { celebration = 2.6; celebrationText = 'GUARDIAN CORE DESTROYED'; if (effectsMax && !reducedMotion) effects.supernova(enemy.x, enemy.y); }
+  saveBest(); sync();
+};
+combat.onAttack = enemy => {
+  if (effectsMax && !reducedMotion) effects.burst(enemy.x, enemy.y + 15, '#ff456f', 0.42);
+  tone(180, 0.12, 0.025);
+};
+combat.onPlayerHit = damage => {
+  shake = effectsMax ? 6 : 0; impact = 1; celebration = 0.7; celebrationText = `CORE HIT · -${damage}`;
+  if (effectsMax && !reducedMotion) effects.burst(228, 650, '#ff456f', 1.1);
+  tone(110, 0.32, 0.07, 0, 45); sync();
+};
+combat.onWave = wave => {
+  if (wave === 4) { celebration = 2.2; celebrationText = 'GUARDIAN CORE INBOUND'; }
+  sync();
+};
+combat.onCombo = combo => {
+  if ([10, 20, 50].includes(combo)) {
+    celebration = 1.4; celebrationText = `${combo} HIT COMBO`;
+    if (effectsMax && !reducedMotion) { effects.supernova(228, 400); shake = Math.min(7, 2 + combo / 10); }
+    rewardSound('combo', combo >= 20 ? 2 : 1);
+  }
+  sync();
+};
 function saveBest() {
   if (score > best) { best = score; try { localStorage.setItem('orbit-best', String(best)); } catch { /* Continue without persistence. */ } }
 }
 physics.onDrain = () => {
+  if (combatMode && combat.status === 'playing') {
+    clearInput(); trails.clear(); combat.combo = 0; combat.onCombo(0); physics.resetBall(); relaunchTimer = 0.8;
+    celebration = 1.1; celebrationText = 'BALL RECOVERED';
+    if (effectsMax && !reducedMotion) effects.burst(228, 714, '#72ffd9', 0.8);
+    toast('BALL RECOVERED · コンボリセット'); sync(); return;
+  }
   balls--; clearInput(); trails.clear(); scoring.resetChain(); tone(150, 0.4);
   clearReward();
   if (balls === 0) {
@@ -300,7 +400,8 @@ physics.onDrain = () => {
 };
 
 $('start').addEventListener('click', start);
-$('overlay-start').addEventListener('click', () => state === 'paused' ? pause() : start());
+$('stage-start').addEventListener('click', startStage);
+$('overlay-start').addEventListener('click', () => state === 'paused' ? pause() : combatMode ? startStage() : start());
 $('pause').addEventListener('click', pause);
 $('sound').addEventListener('click', () => { sound = !sound; $('sound').textContent = `♫ サウンド ${sound ? 'ON' : 'OFF'}`; $('sound').setAttribute('aria-pressed', String(sound)); if (sound) tone(); });
 function syncEffects() {
@@ -358,6 +459,31 @@ function circle(x: number, y: number, r: number, fill: string, stroke?: string, 
 function label(text: string, x: number, y: number, size: number, color: string, weight = '500') {
   ctx.fillStyle = color; ctx.font = `${weight} ${size}px "Segoe UI", sans-serif`; ctx.textAlign = 'center'; ctx.fillText(text, x, y);
 }
+function drawCombat() {
+  for (const shot of combat.projectiles) {
+    ctx.save(); ctx.shadowColor = '#ff456f'; ctx.shadowBlur = 16;
+    line([[shot.x, shot.y + 12], [shot.x - shot.vx * 0.045, shot.y - 5]], '#ff456f', 4, 9);
+    circle(shot.x, shot.y, 5, '#ffe7ed', '#ff456f', 2); ctx.restore();
+  }
+  for (const enemy of combat.enemies) {
+    const boss = enemy.kind === 'Guardian Core';
+    const color = enemy.hitFlash > 0 ? '#ffffff' : boss ? '#ff5fbd' : enemy.kind === 'Tank' ? '#ffad63' : enemy.kind === 'Shooter' ? '#ff7185' : '#68f8ff';
+    ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = effectsMax ? boss ? 25 : 15 : 3;
+    if (boss) {
+      ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y - 32); ctx.lineTo(enemy.x + 42, enemy.y - 9); ctx.lineTo(enemy.x + 34, enemy.y + 27); ctx.lineTo(enemy.x, enemy.y + 39); ctx.lineTo(enemy.x - 34, enemy.y + 27); ctx.lineTo(enemy.x - 42, enemy.y - 9); ctx.closePath();
+      ctx.fillStyle = '#301a42'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
+      circle(enemy.x, enemy.y + 2, 13, enemy.hitFlash > 0 ? '#fff' : '#bf318d', '#ffd9f2', 2); circle(enemy.x, enemy.y + 2, 5, '#fff1fb');
+      label('GUARDIAN CORE', enemy.x, enemy.y - 45, 11, '#ffe0f8', '800');
+    } else {
+      ctx.beginPath(); ctx.moveTo(enemy.x, enemy.y - 17); ctx.lineTo(enemy.x + 18, enemy.y); ctx.lineTo(enemy.x, enemy.y + 17); ctx.lineTo(enemy.x - 18, enemy.y); ctx.closePath();
+      ctx.fillStyle = enemy.kind === 'Tank' ? '#462b23' : '#172c42'; ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = enemy.kind === 'Tank' ? 4 : 2; ctx.stroke();
+      circle(enemy.x, enemy.y, enemy.kind === 'Tank' ? 6 : 4, color); label(enemy.kind.toUpperCase(), enemy.x, enemy.y - 23, 8, '#d9edf1', '700');
+    }
+    const width = boss ? 110 : 48, hpY = enemy.y + (boss ? 48 : 25);
+    ctx.fillStyle = '#07121c'; ctx.fillRect(enemy.x - width / 2, hpY, width, 5); ctx.fillStyle = color; ctx.fillRect(enemy.x - width / 2, hpY, width * enemy.hp / enemy.maxHp, 5);
+    ctx.restore();
+  }
+}
 function draw() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (canvas.width !== WIDTH * dpr) {
@@ -410,7 +536,7 @@ function draw() {
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 7, '#263f49', '#6ce8d2', 1.4);
     circle(94 + i * 82, 123 - (i === 1 ? 14 : 0), 2.5, '#6ce8d2');
   }
-  drawOrbit(ctx, physics.orbit, clock, effectsMax && !reducedMotion);
+  if (!combatMode) drawOrbit(ctx, physics.orbit, clock, effectsMax && !reducedMotion);
   for (const wall of rails) {
     line([[wall.a.x, wall.a.y + 3], [wall.b.x, wall.b.y + 3]], '#080f17', 11);
   }
@@ -438,7 +564,8 @@ function draw() {
       ctx.globalAlpha = 1;
     }
   });
-  drawShields(ctx, physics.orbit);
+  if (combatMode) drawCombat();
+  if (!combatMode) drawShields(ctx, physics.orbit);
   const gateOpen = physics.orbit.isOpen;
   const celebrating = celebration > 0;
   const holeActive = physics.blackHoleReady || physics.busy || physics.multiball;
@@ -456,9 +583,9 @@ function draw() {
   for (let i = 0; i < 2; i++) circle(217 + i * 22, 465, 4, i < physics.lockedBalls ? '#ffe5a5' : '#27203c', '#a07ac5');
   label(physics.multiball ? `${physics.liveBallCount} BALLS · 周回で JACKPOT` : physics.blackHoleReady ? '↓ BLACK HOLE OPEN · ここを狙え ↓' : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`, 228, 439, 9, holeColor, '700');
   ctx.shadowColor = '#e277ff'; ctx.shadowBlur = effectsMax ? 16 : 0;
-  label(celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
+  label(combatMode ? celebrating ? celebrationText : `WAVE ${combat.wave} / 4` : celebrating ? celebrationText : physics.multiball ? 'SUPERNOVA' : gateOpen ? `${physics.orbit.openRemaining.toFixed(1)}s OPEN` : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`, 228, 518, 23, celebrating ? '#fff3ca' : '#eadcff', '800');
   ctx.shadowBlur = 0;
-  label(physics.multiball ? `JACKPOT +${physics.orbit.nextJackpot.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
+  if (!combatMode) label(physics.multiball ? `JACKPOT +${physics.orbit.nextJackpot.toLocaleString()} · GATES ALWAYS OPEN` : gateOpen ? `L +${ORBIT_LAP_BASE * Math.min(ORBIT_LAP_MAX_STEPS, physics.orbit.laps + 1)} · R ${ORBIT_CHARGE_POINTS}+CHARGE` : '3 TARGETS → 15s ORBIT', 228, 537, 9, '#acb3d1');
   for (const side of [true, false]) {
     const f = physics.flipper(side);
     const flash = flipperFlashes[side ? 0 : 1];
@@ -512,7 +639,23 @@ function frame(time: number) {
     clock += dt;
     if (charging) power = Math.min(1, power + dt * 0.85);
     accumulator += dt;
-    while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
+    if (!combatMode || combat.status === 'playing') {
+      while (accumulator >= STEP) { physics.step(STEP, left, right); accumulator -= STEP; if (state !== 'playing') { accumulator = 0; break; } }
+    } else accumulator = 0;
+    if (combatMode && state === 'playing' && combat.status === 'playing') {
+      if (relaunchTimer > 0) { relaunchTimer = Math.max(0, relaunchTimer - dt); if (relaunchTimer === 0) physics.launch(0.72); }
+      combat.step(dt, relaunchTimer > 0 ? [] : physics.balls); syncCombat();
+      const finalStatus: string = combat.status;
+      if (finalStatus === 'choice' && $('skill-choice').hidden) presentSkillChoice();
+      if (!finishShown && (finalStatus === 'gameover' || finalStatus === 'clear')) {
+        finishShown = true; state = 'over'; $('skill-choice').hidden = true; $('overlay').classList.remove('hidden');
+        $('overlay-kicker').textContent = finalStatus === 'clear' ? 'STAGE 1 COMPLETE' : 'CORE DESTROYED';
+        $('overlay-title').textContent = finalStatus === 'clear' ? 'STAGE CLEAR' : 'GAME OVER';
+        $('overlay-text').textContent = finalStatus === 'clear' ? `Guardian Core撃破 · 残りHP ${combat.hp}` : 'プレイヤーコアのHPが0になった';
+        $('overlay-start').textContent = 'もう一度挑戦 ↗'; $('stage-start').classList.remove('hidden');
+        if (finalStatus === 'clear' && effectsMax && !reducedMotion) { effects.supernova(228, 390); shake = 9; }
+      }
+    }
     const currentBalls = physics.balls;
     for (const ball of trails.keys()) if (!currentBalls.includes(ball)) trails.delete(ball);
     if (physics.launched && effectsMax && !reducedMotion) for (const ball of currentBalls) {
@@ -542,12 +685,13 @@ function frame(time: number) {
   saveDisplay.hidden = state === 'ready' || state === 'over' || physics.busy || physics.multiball || (physics.saveRemaining <= 0 && physics.relaunchIn <= 0);
   saveDisplay.textContent = physics.relaunchIn > 0 ? '✦ BALL SAVED · 自動で再発射' : `✦ BALL SAVE · ${(Math.ceil(physics.saveRemaining * 10) / 10).toFixed(1)}s`;
   $('charge').style.width = `${power * 100}%`;
-  $('nova-state').textContent = physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
+  $('nova-state').textContent = combatMode ? `PLAYER CORE · HP ${combat.hp}/100 · BALL LOST = COMBO RESET` : physics.multiball ? `✦ SUPERNOVA · ${physics.liveBallCount} BALLS` : physics.blackHoleReady ? `LOCK ${physics.lockedBalls}/2 · 中央の穴を狙え！` : physics.busy ? `LOCK ${physics.lockedBalls}/2 · ${physics.lockedBalls === 2 ? '超新星、解放！' : '補充中…'}` : `LOCK ${physics.lockedBalls}/2 · 周回で穴を開放`;
+  document.querySelector<HTMLElement>('.charge-track')!.hidden = combatMode;
   canvas.dataset.ballCount = String(physics.balls.length);
   document.body.classList.toggle('supernova', physics.multiball);
-  $('orbit-state').textContent = physics.multiball ? `✦ JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}` : physics.orbit.openRemaining > 0 ? `● ${physics.orbit.active ? 'ORBIT · ' : ''}OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : physics.orbit.active ? '● ORBIT RUN' : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
+  $('orbit-state').textContent = combatMode ? `WAVE ${combat.wave} · ENEMIES ${combat.enemies.length}` : physics.multiball ? `✦ JACKPOT +${physics.orbit.nextJackpot.toLocaleString()}` : physics.orbit.openRemaining > 0 ? `● ${physics.orbit.active ? 'ORBIT · ' : ''}OPEN ${physics.orbit.openRemaining.toFixed(1)}s` : physics.orbit.active ? '● ORBIT RUN' : `SHIELD ${physics.orbit.down.filter(Boolean).length}/3`;
   $('orbit-state').dataset.mode = physics.orbit.active ? 'running' : physics.orbit.openRemaining > 0 ? 'open' : 'locked';
-  $('orbit-state').classList.toggle('urgent', !physics.multiball && physics.orbit.openRemaining > 0 && physics.orbit.openRemaining <= 5);
+  $('orbit-state').classList.toggle('urgent', !combatMode && !physics.multiball && physics.orbit.openRemaining > 0 && physics.orbit.openRemaining <= 5);
   $('reward-progress').hidden = state === 'ready' || state === 'over';
   $('multiplier-progress').textContent = scoring.hitsToNextMultiplier === 0 ? '×5 MAX!!' : `×${scoring.multiplier + 1}まであと${scoring.hitsToNextMultiplier} HIT`;
   const targetsLeft = physics.orbit.down.filter(down => !down).length;

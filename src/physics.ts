@@ -140,6 +140,15 @@ export class Physics {
     return true;
   }
 
+  /** Adds a launched ball for combat skills without changing the classic game's ball stock. */
+  addCombatBall() {
+    const actor = newBall();
+    actor.launched = true; actor.inLane = false; actor.saveAvailable = false;
+    const direction = this.actors.length % 2 ? -1 : 1;
+    actor.ball = { x: 228 + direction * 24, y: 620, vx: direction * 210, vy: -620, radius: 8 };
+    this.actors.push(actor); this.onLaunch();
+  }
+
   private launchActor(actor: BallState, power: number) {
     actor.launched = true; actor.launchPower = Math.min(1, Math.max(0, power));
     actor.ball.vy = -(980 + actor.launchPower * 340);
